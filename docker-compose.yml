@@ -1,0 +1,13 @@
+services:
+  atlas-agent:
+    build: .
+    image: atlas-agent:latest
+    stdin_open: true
+    tty: true
+    environment:
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN}
+      ATLAS_MODEL: ${ATLAS_MODEL:-claude-sonnet-4-20250514}
+    volumes:
+      - ${PWD}:/workspace
+    working_dir: /workspace
