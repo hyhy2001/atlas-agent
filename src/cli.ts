@@ -10,10 +10,11 @@ import { startRepl } from "./repl.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./agent/system_prompt.js";
 import { loadSession } from "./sessions.js";
 import { loadProjectContext, findProjectContextPath } from "./agent/context_loader.js";
+import { loadCommands } from "./commands.js";
 import type { ExecutionContext } from "./tools/types.js";
 
-function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string } {
-  const result: { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string } = {};
+function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string; plan?: boolean } {
+  const result: { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string; plan?: boolean } = {};
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--model" && argv[i + 1]) {
@@ -28,6 +29,8 @@ function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: 
       result.systemPromptFile = argv[++i];
     } else if (arg === "--resume" && argv[i + 1]) {
       result.resume = argv[++i];
+    } else if (arg === "--plan") {
+      result.plan = true;
     }
   }
   return result;
@@ -120,6 +123,12 @@ async function main() {
     process.exit(0);
   });
 
+  // Load custom commands
+  const commands = await loadCommands(process.cwd());
+  if (commands.length > 0) {
+    console.log(`Loaded ${commands.length} custom commands`);
+  }
+
   try {
     await startRepl({
       provider,
@@ -127,6 +136,9 @@ async function main() {
       executor,
       systemPrompt,
       initialSession,
+      projectContextPath: projectContextPath ?? undefined,
+      commands,
+      startInPlanMode: args.plan,
     });
   } finally {
     await cleanup();

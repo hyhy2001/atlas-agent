@@ -5,12 +5,19 @@ import type { ToolExecutor } from "./tools/executor.js";
 import type { MessageParam } from "./provider/types.js";
 import { runAgentLoop } from "./agent/loop.js";
 import {
+  shouldCompact,
+  compactMessages,
+  DEFAULT_COMPACTION_CONFIG,
+  type CompactionConfig,
+} from "./agent/compaction.js";
+import {
   generateSessionId,
   saveSession,
   loadSession,
   listSessions,
   type Session,
 } from "./sessions.js";
+import { PlanMode } from "./agent/plan_mode.js";
 
 export async function startRepl(params: {
   provider: AnthropicProvider;
@@ -19,8 +26,18 @@ export async function startRepl(params: {
   systemPrompt?: string;
   initialSession?: Session;
   projectContextPath?: string;
+  commands?: import("./commands.js").CustomCommand[];
+  compactionConfig?: CompactionConfig;
+  startInPlanMode?: boolean;
 }): Promise<void> {
-  const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath } = params;
+  const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode } = params;
+  const compactionCfg = params.compactionConfig ?? DEFAULT_COMPACTION_CONFIG;
+
+  const planMode = new PlanMode();
+  if (startInPlanMode) {
+    planMode.enter();
+    console.log("[Plan mode ON — agent can only read, not modify]");
+  }
 
   const toolCount = toolRegistry.getAll().length;
   const model = provider.getModel();
@@ -39,7 +56,8 @@ export async function startRepl(params: {
 
   const prompt = (): Promise<string | null> =>
     new Promise((resolve) => {
-      rl.question("> ", (answer) => {
+      const promptStr = planMode.isActive() ? "[plan] > " : "> ";
+      rl.question(promptStr, (answer) => {
         resolve(answer);
       });
       rl.once("close", () => resolve(null));
@@ -124,15 +142,85 @@ export async function startRepl(params: {
       return true;
     }
 
+    if (input === "/plan") {
+      planMode.enter();
+      console.log("[Plan mode ON — agent can only read, not modify]");
+      return true;
+    }
+
+    if (input === "/execute" || input === "/do") {
+      planMode.exit();
+      console.log("[Plan mode OFF — agent can now modify files]");
+      return true;
+    }
+
+    if (input === "/compact") {
+      const before = messages.length;
+      messages = await compactMessages({ messages, provider, config: compactionCfg });
+      console.log(`[Compacted: ${before} messages → ${messages.length} messages]`);
+      return true;
+    }
+
     if (input === "/help") {
       console.log("Commands:");
       console.log("  /save       — Save current session");
       console.log("  /sessions   — List saved sessions");
       console.log("  /load <id>  — Load a saved session");
       console.log("  /clear      — Clear history, start fresh");
+      console.log("  /plan       — Enter plan mode (read-only, no modifications)");
+      console.log("  /execute    — Exit plan mode (allow modifications)");
+      console.log("  /compact    — Compact conversation history");
       console.log("  /help       — Show this help");
       console.log("  /context    — Show loaded project context path");
+      if (commands && commands.length > 0) {
+        console.log("\nCustom commands:");
+        for (const cmd of commands) {
+          const desc = cmd.description ? ` — ${cmd.description}` : "";
+          console.log(`  /${cmd.name}${desc}`);
+        }
+      }
       return true;
+    }
+
+    // Custom commands
+    if (commands && commands.length > 0) {
+      const withoutSlash = input.slice(1);
+      const spaceIdx = withoutSlash.indexOf(" ");
+      const cmdName = spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx);
+      const cmdArgs = spaceIdx === -1 ? "" : withoutSlash.slice(spaceIdx + 1).trim();
+
+      const matched = commands.find((c) => c.name === cmdName);
+      if (matched) {
+        let fullPrompt = matched.promptBody;
+        if (cmdArgs) {
+          fullPrompt += `\n\nUser argument: ${cmdArgs}`;
+        }
+        messages.push({ role: "user", content: fullPrompt });
+
+        const controller = new AbortController();
+        const onSigint = () => controller.abort();
+        process.on("SIGINT", onSigint);
+
+        try {
+          await runAgentLoop({
+            provider,
+            messages,
+            toolRegistry: planMode.isActive() ? planMode.filterRegistry(toolRegistry) : toolRegistry,
+            executor,
+            systemPrompt,
+            abortSignal: controller.signal,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`\nError: ${msg}`);
+        } finally {
+          process.removeListener("SIGINT", onSigint);
+        }
+
+        saveSession(buildSession()).catch(() => {});
+        process.stdout.write("\n");
+        return true;
+      }
     }
 
     return false;
@@ -152,7 +240,11 @@ export async function startRepl(params: {
       if (handled) continue;
     }
 
-    messages.push({ role: "user", content: trimmed });
+    const userContent = planMode.isActive()
+      ? "[PLAN MODE: You can only read and analyze. Do NOT suggest tool calls for write_file, edit_file, or bash. Design your approach and explain what changes you would make.]\n\n" + trimmed
+      : trimmed;
+
+    messages.push({ role: "user", content: userContent });
 
     const controller = new AbortController();
     const onSigint = () => controller.abort();
@@ -162,7 +254,7 @@ export async function startRepl(params: {
       await runAgentLoop({
         provider,
         messages,
-        toolRegistry,
+        toolRegistry: planMode.isActive() ? planMode.filterRegistry(toolRegistry) : toolRegistry,
         executor,
         systemPrompt,
         abortSignal: controller.signal,
@@ -172,6 +264,13 @@ export async function startRepl(params: {
       console.error(`\nError: ${msg}`);
     } finally {
       process.removeListener("SIGINT", onSigint);
+    }
+
+    // Auto-compact if over threshold
+    if (shouldCompact(messages, compactionCfg)) {
+      const before = messages.length;
+      messages = await compactMessages({ messages, provider, config: compactionCfg });
+      console.log(`[Compacted: ${before} messages → ${messages.length} messages]`);
     }
 
     // Auto-save after each agent turn (fire-and-forget)
