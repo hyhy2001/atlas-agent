@@ -5,8 +5,8 @@ services:
     stdin_open: true
     tty: true
     environment:
-      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL}
-      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN}
+      ATLAS_BASE_URL: ${ATLAS_BASE_URL}
+      ATLAS_AUTH_TOKEN: ${ATLAS_AUTH_TOKEN}
       ATLAS_MODEL: ${ATLAS_MODEL:-claude-sonnet-4-20250514}
     volumes:
       - ${PWD}:/workspace

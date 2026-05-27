@@ -42,11 +42,11 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   const merged = { ...globalConfig, ...localConfig };
 
-  if (process.env["ANTHROPIC_BASE_URL"]) {
-    merged.baseURL = process.env["ANTHROPIC_BASE_URL"];
+  if (process.env["ATLAS_BASE_URL"]) {
+    merged.baseURL = process.env["ATLAS_BASE_URL"];
   }
-  if (process.env["ANTHROPIC_AUTH_TOKEN"]) {
-    merged.authToken = process.env["ANTHROPIC_AUTH_TOKEN"];
+  if (process.env["ATLAS_AUTH_TOKEN"]) {
+    merged.authToken = process.env["ATLAS_AUTH_TOKEN"];
   }
   if (process.env["ATLAS_MODEL"]) {
     merged.model = process.env["ATLAS_MODEL"];

@@ -11,6 +11,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "./agent/system_prompt.js";
 import { loadSession } from "./sessions.js";
 import { loadProjectContext, findProjectContextPath } from "./agent/context_loader.js";
 import { loadCommands } from "./commands.js";
+import { loadCustomSubagents, BUILTIN_SUBAGENTS } from "./agent/subagents.js";
 import type { ExecutionContext } from "./tools/types.js";
 
 function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string; plan?: boolean } {
@@ -53,7 +54,7 @@ async function main() {
     systemPrompt = readFileSync(args.systemPromptFile, "utf-8");
   }
 
-  // Append project context (CLAUDE.md / AGENT.md) if found
+  // Append project context if found
   const projectContextPath = await findProjectContextPath(process.cwd());
   const projectContext = await loadProjectContext(process.cwd());
   if (projectContext && projectContextPath) {
@@ -61,10 +62,10 @@ async function main() {
     console.log(`Loaded project context from ${projectContextPath}`);
   }
 
-  const apiKey = config.authToken || process.env["ANTHROPIC_API_KEY"] || "";
+  const apiKey = config.authToken || process.env["ATLAS_API_KEY"] || "";
   if (!apiKey) {
     console.error(
-      "Error: No API key found. Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN environment variable,\n" +
+      "Error: No API key found. Set ATLAS_AUTH_TOKEN or ATLAS_API_KEY environment variable,\n" +
         "or add authToken to ~/.config/atlas-agent/config.json"
     );
     process.exit(1);
@@ -110,7 +111,11 @@ async function main() {
     permissions,
   };
 
-  const executor = new ToolExecutor(toolRegistry, ctx);
+  // Load hooks config (global + project)
+  const { loadHooks } = await import("./hooks.js");
+  const hooks = await loadHooks(process.cwd());
+
+  const executor = new ToolExecutor(toolRegistry, ctx, hooks);
 
   const cleanup = async () => {
     for (const client of mcpClients) {
@@ -129,6 +134,15 @@ async function main() {
     console.log(`Loaded ${commands.length} custom commands`);
   }
 
+  const customAgents = await loadCustomSubagents(process.cwd());
+  const map = new Map<string, import("./agent/subagents.js").SubagentProfile>();
+  for (const a of BUILTIN_SUBAGENTS) map.set(a.name, a);
+  for (const a of customAgents) map.set(a.name, a);  // override
+  const subagents = Array.from(map.values());
+  if (customAgents.length > 0) {
+    console.log(`Loaded ${customAgents.length} custom subagents`);
+  }
+
   try {
     await startRepl({
       provider,
@@ -139,6 +153,7 @@ async function main() {
       projectContextPath: projectContextPath ?? undefined,
       commands,
       startInPlanMode: args.plan,
+      subagents,
     });
   } finally {
     await cleanup();

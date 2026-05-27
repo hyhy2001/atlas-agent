@@ -1,14 +1,18 @@
 import type { ToolResult, ExecutionContext } from "./types.js";
 import type { ToolRegistry } from "./registry.js";
 import { askPermission } from "../permissions/prompt.js";
+import type { HooksConfig } from "../hooks.js";
+import { matchHooks, buildHookEnv, runHook } from "../hooks.js";
 
 export class ToolExecutor {
   private registry: ToolRegistry;
   private ctx: ExecutionContext;
+  private hooks: HooksConfig;
 
-  constructor(registry: ToolRegistry, ctx: ExecutionContext) {
+  constructor(registry: ToolRegistry, ctx: ExecutionContext, hooks?: HooksConfig) {
     this.registry = registry;
     this.ctx = ctx;
+    this.hooks = hooks ?? { PreToolUse: [], PostToolUse: [] };
   }
 
   async execute(
@@ -55,7 +59,26 @@ export class ToolExecutor {
       return { toolUseId: block.id, content: `Unknown tool: ${block.name}`, isError: true };
     }
     try {
+      // Run pre-hooks
+      const pre = matchHooks(this.hooks.PreToolUse, block.name);
+      for (const hook of pre) {
+        const env = buildHookEnv(block.name, block.input);
+        const hres = await runHook(hook, env);
+        if (hres.exitCode !== 0) {
+          return { toolUseId: block.id, content: `Blocked by PreToolUse hook: ${hres.stdout}`, isError: true };
+        }
+      }
+
       const result = await tool.execute(block.input, this.ctx);
+
+      // Run post hooks (best-effort)
+      const post = matchHooks(this.hooks.PostToolUse, block.name);
+      for (const hook of post) {
+        const env = buildHookEnv(block.name, block.input);
+        // best-effort
+        await runHook(hook, env).catch(() => {});
+      }
+
       return { ...result, toolUseId: block.id };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -91,7 +114,26 @@ export class ToolExecutor {
     }
 
     try {
+      // Run pre-hooks (after permission granted)
+      const pre = matchHooks(this.hooks.PreToolUse, block.name);
+      for (const hook of pre) {
+        const env = buildHookEnv(block.name, block.input);
+        const hres = await runHook(hook, env);
+        if (hres.exitCode !== 0) {
+          return { toolUseId: block.id, content: `Blocked by PreToolUse hook: ${hres.stdout}`, isError: true };
+        }
+      }
+
       const result = await tool.execute(block.input, this.ctx);
+
+      // Run post hooks (best-effort)
+      const post = matchHooks(this.hooks.PostToolUse, block.name);
+      for (const hook of post) {
+        const env = buildHookEnv(block.name, block.input);
+        // best-effort
+        await runHook(hook, env).catch(() => {});
+      }
+
       return { ...result, toolUseId: block.id };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

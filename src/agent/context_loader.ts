@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-const CANDIDATES = [".atlas/AGENT.md", "CLAUDE.md", ".claude/CLAUDE.md"];
+const CANDIDATES = [".atlas/ATLAS.md", "ATLAS.md", ".atlas/AGENT.md"];
 
 export async function findProjectContextPath(cwd: string): Promise<string | null> {
   for (const candidate of CANDIDATES) {

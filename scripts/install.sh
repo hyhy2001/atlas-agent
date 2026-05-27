@@ -31,8 +31,8 @@ set -euo pipefail
 # Run atlas-agent in Docker with current working dir mounted
 docker run --rm -it \
   -v "$(pwd)":/workspace \
-  -e ANTHROPIC_BASE_URL \
-  -e ANTHROPIC_AUTH_TOKEN \
+  -e ATLAS_BASE_URL \
+  -e ATLAS_AUTH_TOKEN \
   atlas-agent:latest "$@"
 EOF
 
@@ -40,4 +40,4 @@ chmod +x "$WRAPPER"
 
 echo "Created wrapper: $WRAPPER"
 
-echo "To use atlas-agent, ensure the following env vars are set in your shell:\n  export ANTHROPIC_BASE_URL=...\n  export ANTHROPIC_AUTH_TOKEN=...\nYou can add them to your ~/.bashrc or ~/.zshrc."
+echo "To use atlas-agent, ensure the following env vars are set in your shell:\n  export ATLAS_BASE_URL=...\n  export ATLAS_AUTH_TOKEN=...\nYou can add them to your ~/.bashrc or ~/.zshrc."

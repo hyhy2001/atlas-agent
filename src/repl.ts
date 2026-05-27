@@ -18,6 +18,9 @@ import {
   type Session,
 } from "./sessions.js";
 import { PlanMode } from "./agent/plan_mode.js";
+import chalk from "chalk";
+import { isMultilineStart, isMultilineEnd, shouldContinue, stripContinuation } from "./multiline.js";
+import { filterRegistryForSubagent, getSubagent, listSubagents, type SubagentProfile } from "./agent/subagents.js";
 
 export async function startRepl(params: {
   provider: AnthropicProvider;
@@ -29,6 +32,7 @@ export async function startRepl(params: {
   commands?: import("./commands.js").CustomCommand[];
   compactionConfig?: CompactionConfig;
   startInPlanMode?: boolean;
+  subagents?: SubagentProfile[];
 }): Promise<void> {
   const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode } = params;
   const compactionCfg = params.compactionConfig ?? DEFAULT_COMPACTION_CONFIG;
@@ -54,11 +58,50 @@ export async function startRepl(params: {
   let currentSessionId = initialSession?.id ?? generateSessionId();
   const sessionCreatedAt = initialSession?.createdAt ?? new Date().toISOString();
 
-  const prompt = (): Promise<string | null> =>
+  const readInput = (): Promise<string | null> =>
     new Promise((resolve) => {
-      const promptStr = planMode.isActive() ? "[plan] > " : "> ";
-      rl.question(promptStr, (answer) => {
-        resolve(answer);
+      const planPrefix = planMode.isActive() ? "[plan] " : "";
+      rl.question(`${planPrefix}> `, (firstLine) => {
+        if (firstLine === null) { resolve(null); return; }
+        const trimmed = firstLine.trim();
+
+        // Triple backtick mode
+        if (isMultilineStart(trimmed)) {
+          const lines: string[] = [];
+          process.stdout.write(chalk.gray("... "));
+          const collectLine = () => {
+            rl.question("... ", (line) => {
+              if (isMultilineEnd(line.trim())) {
+                resolve(lines.join("\n"));
+              } else {
+                lines.push(line);
+                collectLine();
+              }
+            });
+          };
+          collectLine();
+          return;
+        }
+
+        // Backslash continuation
+        if (shouldContinue(trimmed)) {
+          const lines: string[] = [stripContinuation(trimmed)];
+          const collectLine = () => {
+            rl.question("... ", (line) => {
+              if (shouldContinue(line.trim())) {
+                lines.push(stripContinuation(line.trim()));
+                collectLine();
+              } else {
+                lines.push(line);
+                resolve(lines.join("\n"));
+              }
+            });
+          };
+          collectLine();
+          return;
+        }
+
+        resolve(firstLine);
       });
       rl.once("close", () => resolve(null));
     });
@@ -170,8 +213,11 @@ export async function startRepl(params: {
       console.log("  /plan       — Enter plan mode (read-only, no modifications)");
       console.log("  /execute    — Exit plan mode (allow modifications)");
       console.log("  /compact    — Compact conversation history");
-      console.log("  /help       — Show this help");
       console.log("  /context    — Show loaded project context path");
+      console.log("  /agent <name>  — Invoke a subagent for one turn");
+      console.log("  /agents        — List available subagents");
+      console.log("  /help       — Show this help");
+      console.log("\nMulti-line: type ``` to start/end a block, or end a line with \\ to continue");
       if (commands && commands.length > 0) {
         console.log("\nCustom commands:");
         for (const cmd of commands) {
@@ -179,6 +225,82 @@ export async function startRepl(params: {
           console.log(`  /${cmd.name}${desc}`);
         }
       }
+      return true;
+    }
+
+    if (input === "/agents") {
+      const allAgents = params.subagents ?? listSubagents();
+      console.log("Available agents:");
+      for (const agent of allAgents) {
+        console.log(`  ${agent.name}  — ${agent.description}`);
+      }
+      return true;
+    }
+
+    if (input.startsWith("/agent ") || input === "/agent") {
+      const rest = input.slice(7).trim();
+      const spaceIdx = rest.indexOf(" ");
+      const agentName = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
+      const agentPrompt = spaceIdx === -1 ? "" : rest.slice(spaceIdx + 1).trim();
+
+      if (!agentName) {
+        const allAgents = params.subagents ?? listSubagents();
+        console.log("Usage: /agent <name> [prompt]");
+        console.log("Available agents:");
+        for (const agent of allAgents) {
+          console.log(`  ${agent.name}  — ${agent.description}`);
+        }
+        return true;
+      }
+
+      const allAgents = params.subagents ?? listSubagents();
+      const profile = allAgents.find((a) => a.name === agentName);
+      if (!profile) {
+        console.log(`Unknown agent: ${agentName}`);
+        console.log("Available agents:");
+        for (const agent of allAgents) {
+          console.log(`  ${agent.name}  — ${agent.description}`);
+        }
+        return true;
+      }
+
+      const filteredRegistry = filterRegistryForSubagent(toolRegistry, profile);
+      const userPrompt = agentPrompt || null;
+
+      if (!userPrompt) {
+        console.log(`[${profile.name}] Enter your prompt:`);
+        const subInput = await readInput();
+        if (!subInput || !subInput.trim()) {
+          console.log("No input provided, cancelled.");
+          return true;
+        }
+        messages.push({ role: "user", content: subInput.trim() });
+      } else {
+        messages.push({ role: "user", content: userPrompt });
+      }
+
+      const controller = new AbortController();
+      const onSigint = () => controller.abort();
+      process.on("SIGINT", onSigint);
+
+      try {
+        await runAgentLoop({
+          provider,
+          messages,
+          toolRegistry: filteredRegistry,
+          executor,
+          systemPrompt: profile.systemPrompt,
+          abortSignal: controller.signal,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`\nError: ${msg}`);
+      } finally {
+        process.removeListener("SIGINT", onSigint);
+      }
+
+      saveSession(buildSession()).catch(() => {});
+      process.stdout.write("\n");
       return true;
     }
 
@@ -227,7 +349,7 @@ export async function startRepl(params: {
   }
 
   while (true) {
-    const input = await prompt();
+    const input = await readInput();
 
     if (input === null) break;
 
