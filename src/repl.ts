@@ -56,8 +56,17 @@ export async function startRepl(params: {
   const totalTools = params.totalToolCount ?? leaderTools;
   const model = provider.getModel();
 
-  console.log(`atlas-agent v1.0.0 | ${leaderTools} leader / ${totalTools} total tools | model: ${model}`);
-  console.log('Type "exit" or "quit" to leave. /help for commands.\n');
+  process.stdout.write("\n");
+  process.stdout.write(chalk.bold.cyan(" █████╗ ████████╗██╗      █████╗ ███████╗") + "\n");
+  process.stdout.write(chalk.bold.cyan("██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝") + "\n");
+  process.stdout.write(chalk.bold.cyan("███████║   ██║   ██║     ███████║███████╗ ") + "\n");
+  process.stdout.write(chalk.bold.cyan("██╔══██║   ██║   ██║     ██╔══██║╚════██║") + "\n");
+  process.stdout.write(chalk.bold.cyan("██║  ██║   ██║   ███████╗██║  ██║███████║") + "\n");
+  process.stdout.write(chalk.bold.cyan("╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝") + "\n");
+  process.stdout.write("\n");
+  console.log(chalk.gray(`  AI Coding Assistant  •  v1.0.0  •  ${leaderTools} leader / ${totalTools} total tools`));
+  console.log(chalk.gray(`  Model: ${model}`));
+  console.log(chalk.gray(`  Type /help for commands, "exit" to quit\n`));
 
   const allCommandNames = [
     "save", "sessions", "load", "clear", "help", "context",
