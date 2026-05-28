@@ -76,7 +76,7 @@ export async function startRepl(params: {
   ];
 
   const subagentNames = [
-    "atlas-mech", "atlas-coder", "atlas-rescue",
+    "atlas-swift", "atlas-forge", "atlas-deep",
     ...(params.subagents ?? []).map(s => s.name),
   ];
 

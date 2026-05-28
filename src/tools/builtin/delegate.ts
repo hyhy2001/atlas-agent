@@ -5,7 +5,7 @@ import { ToolExecutor } from "../executor.js";
 import { runAgentLoop } from "../../agent/loop.js";
 import type { Message } from "../../provider/types.js";
 
-const ATLAS_MECH_PROMPT = `You are atlas-mech, a mechanical code executor. You ONLY apply exact edits provided to you.
+const ATLAS_MECH_PROMPT = `You are atlas-swift, a mechanical code executor. You ONLY apply exact edits provided to you.
 
 Rules:
 - Apply the exact old_string → new_string replacements specified
@@ -14,7 +14,7 @@ Rules:
 - Do NOT discover code, do NOT expand scope, do NOT reason about alternatives
 - If anything is unclear or fails, report and STOP — do not retry`;
 
-const ATLAS_CODER_PROMPT = `You are atlas-coder, a code implementation agent. You implement features, fix bugs, refactor code, and write tests.
+const ATLAS_CODER_PROMPT = `You are atlas-forge, a code implementation agent. You implement features, fix bugs, refactor code, and write tests.
 
 Rules:
 - Follow the plan provided by the leader exactly
@@ -25,7 +25,7 @@ Rules:
 - Do NOT decide architecture or expand scope beyond the plan
 - Do NOT skip build/test verification`;
 
-const ATLAS_RESCUE_PROMPT = `You are atlas-rescue, a deep investigation agent. You are called when atlas-coder has failed twice on the same task.
+const ATLAS_RESCUE_PROMPT = `You are atlas-deep, a deep investigation agent. You are called when atlas-forge has failed twice on the same task.
 
 Rules:
 - Start fresh — do NOT repeat the same approach that failed
@@ -36,7 +36,7 @@ Rules:
 - Be thorough but surgical — fix the actual problem, not symptoms`;
 
 interface DelegateInput {
-  agent: "atlas-mech" | "atlas-coder" | "atlas-rescue";
+  agent: "atlas-swift" | "atlas-forge" | "atlas-deep";
   task: string;
   files?: string[];
   build_command?: string;
@@ -44,7 +44,7 @@ interface DelegateInput {
 }
 
 interface ParallelTask {
-  agent: "atlas-mech" | "atlas-coder" | "atlas-rescue";
+  agent: "atlas-swift" | "atlas-forge" | "atlas-deep";
   task: string;
   files?: string[];
   build_command?: string;
@@ -67,15 +67,15 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
   const reasoningModel = (ctx as any)._reasoningModel || process.env["ATLAS_REASONING_MODEL"];
 
   switch (task.agent) {
-    case "atlas-mech":
+    case "atlas-swift":
       systemPrompt = ATLAS_MECH_PROMPT;
       subProvider = fastModel ? provider.withModel(fastModel) : provider;
       break;
-    case "atlas-coder":
+    case "atlas-forge":
       systemPrompt = ATLAS_CODER_PROMPT;
       subProvider = fastModel ? provider.withModel(fastModel) : provider;
       break;
-    case "atlas-rescue":
+    case "atlas-deep":
       systemPrompt = ATLAS_RESCUE_PROMPT;
       subProvider = reasoningModel ? provider.withModel(reasoningModel) : provider;
       break;
@@ -89,7 +89,7 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
   const messages: Message[] = [{ role: "user", content: fullTask }];
 
   let subRegistry = registry;
-  if (task.agent === "atlas-mech") {
+  if (task.agent === "atlas-swift") {
     subRegistry = new ToolRegistry();
     const allowed = ["read_file", "write_file", "edit_file", "bash"];
     for (const tool of registry.getAll()) {
@@ -131,13 +131,13 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
 
 export const delegateTool: ToolDefinition = {
   name: "delegate",
-  description: "Delegate a coding task to a subagent. Use atlas-mech for mechanical edits (exact old→new), atlas-coder for features/refactors/tests, atlas-rescue when coder has failed twice.",
+  description: "Delegate a coding task to a subagent. Use atlas-swift for mechanical edits (exact old→new), atlas-forge for features/refactors/tests, atlas-deep when coder has failed twice.",
   inputSchema: {
     properties: {
       agent: {
         type: "string",
-        enum: ["atlas-mech", "atlas-coder", "atlas-rescue"],
-        description: "Which executor to use: atlas-mech (mechanical), atlas-coder (logic/features), atlas-rescue (deep investigation)",
+        enum: ["atlas-swift", "atlas-forge", "atlas-deep"],
+        description: "Which executor to use: atlas-swift (mechanical), atlas-forge (logic/features), atlas-deep (deep investigation)",
       },
       task: {
         type: "string",
@@ -178,7 +178,7 @@ export const delegateParallelTool: ToolDefinition = {
         items: {
           type: "object",
           properties: {
-            agent: { type: "string", enum: ["atlas-mech", "atlas-coder", "atlas-rescue"] },
+            agent: { type: "string", enum: ["atlas-swift", "atlas-forge", "atlas-deep"] },
             task: { type: "string", description: "Self-contained task description" },
             files: { type: "array", items: { type: "string" } },
             build_command: { type: "string" },
