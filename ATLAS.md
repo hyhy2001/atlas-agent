@@ -3,7 +3,7 @@
 ## Project Overview
 atlas-agent is an agentic coding CLI built in TypeScript. It uses an OpenAI-compatible API (9router proxy) and pre-wires codebase-memory-mcp for code intelligence.
 
-atlas-agent uses a strict leader/executor architecture: the leader (main model) only orchestrates via delegate; all code reading/editing happens in executor subagents (atlas-mech, atlas-coder, atlas-rescue).
+atlas-agent uses a strict leader/executor architecture: the leader (main model) only orchestrates via delegate; all code reading/editing happens in executor subagents (atlas-swift, atlas-forge, atlas-deep).
 
 ## Tech Stack
 - TypeScript + Node.js >= 20, ESM (`"type": "module"`)
@@ -37,8 +37,8 @@ npm run build:binary # compile to single Bun binary → release/
 - `ATLAS_BASE_URL` — LLM proxy endpoint (required)
 - `ATLAS_AUTH_TOKEN` — API token (required)
 - `ATLAS_MODEL` — model name (default: "all")
-- `ATLAS_FAST_MODEL` — fast/cheap model for executors (atlas-mech, atlas-coder)
-- `ATLAS_REASONING_MODEL` — most capable model for deep investigation (atlas-rescue)
+- `ATLAS_FAST_MODEL` — fast/cheap model for executors (atlas-swift, atlas-forge)
+- `ATLAS_REASONING_MODEL` — most capable model for deep investigation (atlas-deep)
 - `ATLAS_SYSTEM_PROMPT` — override system prompt
 
 ## Conventions

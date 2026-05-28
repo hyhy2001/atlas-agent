@@ -6,7 +6,7 @@ AI Coding Assistant CLI cho team nội bộ — giống Claude Code nhưng dùng
 
 - Leader/executor architecture: model mạnh plan, model rẻ execute
 - 33 tools: file, shell, git, web, MCP code intelligence
-- Subagents: atlas-mech, atlas-coder, atlas-rescue
+- Subagents: atlas-swift, atlas-forge, atlas-deep
 - Session persistence, memory, telemetry
 - Portable: không cần root, không ghi ra home dir
 - Multi-platform: Linux, macOS, Windows
@@ -63,8 +63,8 @@ export ATLAS_BASE_URL="http://your-proxy:port/v1"
 
 ```bash
 export ATLAS_MODEL="all"              # Main model (leader)
-export ATLAS_FAST_MODEL="all"         # Fast model (atlas-coder, atlas-mech)
-export ATLAS_REASONING_MODEL="all"    # Reasoning model (atlas-rescue)
+export ATLAS_FAST_MODEL="all"         # Fast model (atlas-forge, atlas-swift)
+export ATLAS_REASONING_MODEL="all"    # Reasoning model (atlas-deep)
 ```
 
 ## Sử dụng
