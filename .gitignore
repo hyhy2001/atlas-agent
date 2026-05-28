@@ -5,3 +5,4 @@ deps/
 *.tsbuildinfo
 .env
 *.log
+sessions/
