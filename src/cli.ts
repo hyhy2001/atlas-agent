@@ -162,6 +162,11 @@ async function main() {
   const { loadHooks } = await import("./hooks.js");
   const hooks = await loadHooks(process.cwd());
 
+  // Attach provider/registry/hooks to ctx for delegate tool
+  (ctx as any)._provider = provider;
+  (ctx as any)._registry = toolRegistry;
+  (ctx as any)._hooks = hooks;
+
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
 
   const cleanup = async () => {

@@ -8,6 +8,7 @@ import { listDirectoryTool } from "./list_directory.js";
 import { globTool } from "./glob.js";
 import { webFetchTool } from "./web_fetch.js";
 import { todoReadTool, todoWriteTool } from "./todo.js";
+import { delegateTool } from "./delegate.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -20,4 +21,5 @@ export const builtinTools: ToolDefinition[] = [
   webFetchTool,
   todoReadTool,
   todoWriteTool,
+  delegateTool,
 ];
