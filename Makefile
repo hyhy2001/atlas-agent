@@ -96,10 +96,10 @@ ensure-bun:
 install-node:
 	@echo "Installing Node.js v22 into $(NODE_DIR)..."
 	@mkdir -p $(DEPS_DIR)
-	@curl -fsSL "$(NODE_URL)" -o /tmp/node-atlas.tar.gz
+	@curl -fsSL "$(NODE_URL)" -o $(DEPS_DIR)/node-download.tar.gz
 	@mkdir -p $(NODE_DIR)
-	@tar -xzf /tmp/node-atlas.tar.gz -C $(NODE_DIR) --strip-components=1
-	@rm -f /tmp/node-atlas.tar.gz
+	@tar -xzf $(DEPS_DIR)/node-download.tar.gz -C $(NODE_DIR) --strip-components=1
+	@rm -f $(DEPS_DIR)/node-download.tar.gz
 	@echo "  ✓ Node.js $$( $(NODE_BIN) -v) installed at $(NODE_DIR)"
 	@echo "  Tip: add $(NODE_DIR)/bin to PATH to use system-wide"
 
