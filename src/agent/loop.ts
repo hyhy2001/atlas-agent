@@ -1,5 +1,5 @@
-import type { MessageParam } from "../provider/types.js";
-import type { AnthropicProvider } from "../provider/anthropic.js";
+import type { MessageParam, ToolCall } from "../provider/types.js";
+import type { OpenAIProvider } from "../provider/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 
@@ -9,7 +9,7 @@ export interface LoopResult {
 }
 
 export async function runAgentLoop(params: {
-  provider: AnthropicProvider;
+  provider: OpenAIProvider;
   messages: MessageParam[];
   toolRegistry: ToolRegistry;
   executor: ToolExecutor;
@@ -17,67 +17,79 @@ export async function runAgentLoop(params: {
   abortSignal: AbortSignal;
 }): Promise<LoopResult> {
   const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal } = params;
-  const tools = toolRegistry.toAnthropicTools();
-
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
-  while (!abortSignal.aborted) {
-    const stream = provider.stream(messages, tools, systemPrompt);
+  while (true) {
+    if (abortSignal.aborted) return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
 
-    const accumulator = new Map<number, { id: string; name: string; json: string }>();
-    const toolUseBlocks: Array<{ id: string; name: string; input: unknown }> = [];
+    const tools = toolRegistry.toOpenAITools();
+    const toolCalls: ToolCall[] = [];
+    let currentToolCall: { id: string; name: string; args: string } | null = null;
+    let assistantContent = "";
 
-    for await (const event of stream) {
+    for await (const delta of provider.stream(messages, tools, systemPrompt)) {
       if (abortSignal.aborted) break;
 
-      if (event.type === "content_block_start") {
-        const block = event.content_block;
-        if (block.type === "tool_use") {
-          accumulator.set(event.index, { id: block.id, name: block.name, json: "" });
+      if (delta.type === "text" && delta.text) {
+        process.stdout.write(delta.text);
+        assistantContent += delta.text;
+      } else if (delta.type === "tool_call_start") {
+        if (currentToolCall) {
+          toolCalls.push({
+            id: currentToolCall.id,
+            type: "function",
+            function: { name: currentToolCall.name, arguments: currentToolCall.args },
+          });
         }
-      } else if (event.type === "content_block_delta") {
-        const delta = event.delta;
-        if (delta.type === "text_delta") {
-          process.stdout.write(delta.text);
-        } else if (delta.type === "input_json_delta") {
-          const entry = accumulator.get(event.index);
-          if (entry) {
-            entry.json += delta.partial_json;
-          }
+        currentToolCall = {
+          id: delta.toolCallId ?? "",
+          name: delta.toolCallName ?? "",
+          args: delta.argumentsDelta ?? "",
+        };
+      } else if (delta.type === "tool_call_delta") {
+        if (currentToolCall) {
+          currentToolCall.args += delta.argumentsDelta ?? "";
         }
-      } else if (event.type === "content_block_stop") {
-        const entry = accumulator.get(event.index);
-        if (entry) {
-          const input = entry.json ? JSON.parse(entry.json) : {};
-          toolUseBlocks.push({ id: entry.id, name: entry.name, input });
-          accumulator.delete(event.index);
+      } else if (delta.type === "done") {
+        if (currentToolCall) {
+          toolCalls.push({
+            id: currentToolCall.id,
+            type: "function",
+            function: { name: currentToolCall.name, arguments: currentToolCall.args },
+          });
+          currentToolCall = null;
         }
       }
     }
 
-    const finalMessage = await stream.finalMessage();
-    if (finalMessage.usage) {
-      totalInputTokens += finalMessage.usage.input_tokens ?? 0;
-      totalOutputTokens += finalMessage.usage.output_tokens ?? 0;
+    totalInputTokens += Math.ceil(JSON.stringify(messages).length / 4);
+    totalOutputTokens += Math.ceil((assistantContent.length + JSON.stringify(toolCalls).length) / 4);
+
+    const assistantMsg: MessageParam = {
+      role: "assistant",
+      content: assistantContent || null,
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+    };
+    messages.push(assistantMsg);
+
+    if (toolCalls.length === 0) break;
+
+    const toolBlocks = toolCalls.map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      input: JSON.parse(tc.function.arguments || "{}"),
+    }));
+
+    const results = await executor.execute(toolBlocks);
+
+    for (const result of results) {
+      messages.push({
+        role: "tool",
+        content: result.content,
+        tool_call_id: result.toolUseId,
+      });
     }
-    messages.push({ role: "assistant", content: finalMessage.content });
-
-    if (toolUseBlocks.length === 0) {
-      return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
-    }
-
-    const results = await executor.execute(toolUseBlocks);
-
-    messages.push({
-      role: "user",
-      content: results.map((r) => ({
-        type: "tool_result" as const,
-        tool_use_id: r.toolUseId,
-        content: r.content,
-        is_error: r.isError,
-      })),
-    });
   }
 
   return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };

@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { ToolDef } from "../provider/types.js";
 import type { ToolDefinition } from "./types.js";
 
 export class ToolRegistry {
@@ -22,14 +22,21 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  toAnthropicTools(): Anthropic.Tool[] {
+  toOpenAITools(): ToolDef[] {
     return this.getAll().map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: {
-        type: "object" as const,
-        ...tool.inputSchema,
+      type: "function" as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: {
+          type: "object",
+          ...tool.inputSchema,
+        },
       },
     }));
+  }
+
+  toAnthropicTools(): ToolDef[] {
+    return this.toOpenAITools();
   }
 }

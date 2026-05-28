@@ -1,4 +1,4 @@
-import type { AnthropicProvider } from "./provider/anthropic.js";
+import type { OpenAIProvider } from "./provider/openai.js";
 import type { ToolRegistry } from "./tools/registry.js";
 import type { ToolExecutor } from "./tools/executor.js";
 import type { PermissionSession } from "./permissions/session.js";
@@ -15,7 +15,7 @@ interface CollectedToolCall {
 
 export async function runHeadless(params: {
   prompt: string;
-  provider: AnthropicProvider;
+  provider: OpenAIProvider;
   toolRegistry: ToolRegistry;
   executor: ToolExecutor;
   permissions: PermissionSession;

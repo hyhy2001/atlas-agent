@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { loadConfig } from "./config.js";
-import { AnthropicProvider } from "./provider/anthropic.js";
+import { OpenAIProvider } from "./provider/openai.js";
 import { McpClient } from "./mcp/client.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { ToolExecutor } from "./tools/executor.js";
@@ -130,7 +130,7 @@ async function main() {
     initialSession = session;
   }
 
-  const provider = new AnthropicProvider({
+  const provider = new OpenAIProvider({
     apiKey,
     model: config.model,
     baseURL: config.baseURL,

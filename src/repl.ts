@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AnthropicProvider } from "./provider/anthropic.js";
+import type { OpenAIProvider } from "./provider/openai.js";
 import type { ToolRegistry } from "./tools/registry.js";
 import type { ToolExecutor } from "./tools/executor.js";
 import type { MessageParam } from "./provider/types.js";
@@ -26,7 +26,7 @@ import { filterRegistryForSubagent, getSubagent, listSubagents, type SubagentPro
 import { runLifecycleHooks, type HooksConfig } from "./hooks.js";
 
 export async function startRepl(params: {
-  provider: AnthropicProvider;
+  provider: OpenAIProvider;
   toolRegistry: ToolRegistry;
   executor: ToolExecutor;
   systemPrompt?: string;

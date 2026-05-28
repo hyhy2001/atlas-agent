@@ -1,5 +1,5 @@
 import type { MessageParam } from "../provider/types.js";
-import type { AnthropicProvider } from "../provider/anthropic.js";
+import type { OpenAIProvider } from "../provider/openai.js";
 
 export interface CompactionConfig {
   maxTokenEstimate: number;
@@ -24,18 +24,9 @@ export function estimateTokens(messages: MessageParam[]): number {
   for (const msg of messages) {
     if (typeof msg.content === "string") {
       chars += msg.content.length;
-    } else if (Array.isArray(msg.content)) {
-      for (const block of msg.content) {
-        if ("text" in block && typeof block.text === "string") {
-          chars += block.text.length;
-        } else if ("content" in block) {
-          chars += typeof block.content === "string"
-            ? block.content.length
-            : JSON.stringify(block.content).length;
-        } else {
-          chars += JSON.stringify(block).length;
-        }
-      }
+    }
+    if (msg.tool_calls) {
+      chars += JSON.stringify(msg.tool_calls).length;
     }
   }
   return Math.ceil(chars / 4);
@@ -47,7 +38,7 @@ export function shouldCompact(messages: MessageParam[], config: CompactionConfig
 
 export async function compactMessages(params: {
   messages: MessageParam[];
-  provider: AnthropicProvider;
+  provider: OpenAIProvider;
   config: CompactionConfig;
 }): Promise<MessageParam[]> {
   const { messages, provider, config } = params;
