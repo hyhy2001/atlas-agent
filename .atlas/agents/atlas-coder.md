@@ -1,7 +1,7 @@
 ---
 name: atlas-coder
 description: Code implementation agent — features, refactors, tests, debugging
-model: ${ATLAS_SUBAGENT_MODEL}
+model: ${ATLAS_FAST_MODEL}
 restricted_tools: delegate
 ---
 

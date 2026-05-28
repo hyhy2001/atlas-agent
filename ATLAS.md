@@ -35,7 +35,8 @@ npm run build:binary # compile to single Bun binary → release/
 - `ATLAS_BASE_URL` — LLM proxy endpoint (required)
 - `ATLAS_AUTH_TOKEN` — API token (required)
 - `ATLAS_MODEL` — model name (default: "all")
-- `ATLAS_SUBAGENT_MODEL` — model for subagents
+- `ATLAS_FAST_MODEL` — fast/cheap model for executors (atlas-mech, atlas-coder)
+- `ATLAS_REASONING_MODEL` — most capable model for deep investigation (atlas-rescue)
 - `ATLAS_SYSTEM_PROMPT` — override system prompt
 
 ## Conventions

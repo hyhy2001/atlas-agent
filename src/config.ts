@@ -12,10 +12,8 @@ const McpServerSchema = z.object({
 
 const ConfigSchema = z.object({
   model: z.string().default("all"),
-  subagentModel: z.string().optional(),
-  mechModel: z.string().optional(),
-  coderModel: z.string().optional(),
-  rescueModel: z.string().optional(),
+  fastModel: z.string().optional(),
+  reasoningModel: z.string().optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
   systemPrompt: z.string().optional(),
@@ -31,7 +29,7 @@ function getPortableDir(): string | null {
   const exe = process.argv[1];
   if (!exe) return null;
   const dir = dirname(resolve(exe));
-  if (existsSync(join(dir, "config", "config.json")) || existsSync(join(dir, "bin"))) {
+  if (existsSync(join(dir, "config", "settings.json")) || existsSync(join(dir, "bin"))) {
     return dir;
   }
   return null;
@@ -68,11 +66,11 @@ function resolveMcpCommands(
 }
 
 export function loadConfig(overrides?: Partial<Config>): Config {
-  const globalPath = join(homedir(), ".config", "atlas-agent", "config.json");
+  const globalPath = join(homedir(), ".config", "atlas-agent", "settings.json");
   const localPath = join(process.cwd(), ".atlas-agent.json");
 
   const portableDir = getPortableDir();
-  const portablePath = portableDir ? join(portableDir, "config", "config.json") : null;
+  const portablePath = portableDir ? join(portableDir, "config", "settings.json") : null;
 
   const globalConfig = loadJsonFile(globalPath);
   const portableConfig = portablePath ? loadJsonFile(portablePath) : {};
@@ -91,17 +89,12 @@ export function loadConfig(overrides?: Partial<Config>): Config {
     merged.model = process.env["ATLAS_MODEL"];
   }
 
-  if (process.env["ATLAS_SUBAGENT_MODEL"]) {
-    merged.subagentModel = process.env["ATLAS_SUBAGENT_MODEL"];
-  }
-  if (process.env["ATLAS_MECH_MODEL"]) merged.mechModel = process.env["ATLAS_MECH_MODEL"];
-  if (process.env["ATLAS_CODER_MODEL"]) merged.coderModel = process.env["ATLAS_CODER_MODEL"];
-  if (process.env["ATLAS_RESCUE_MODEL"]) merged.rescueModel = process.env["ATLAS_RESCUE_MODEL"];
+  if (process.env["ATLAS_FAST_MODEL"]) merged.fastModel = process.env["ATLAS_FAST_MODEL"];
+  if (process.env["ATLAS_REASONING_MODEL"]) merged.reasoningModel = process.env["ATLAS_REASONING_MODEL"];
 
   if (process.env["ATLAS_SYSTEM_PROMPT"]) {
     merged.systemPrompt = process.env["ATLAS_SYSTEM_PROMPT"];
   }
-
   if (overrides) {
     Object.assign(merged, overrides);
   }

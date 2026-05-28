@@ -78,7 +78,8 @@ docker run --rm -it \
   -e ATLAS_AUTH_TOKEN \
   -e ATLAS_API_KEY \
   -e ATLAS_MODEL \
-  -e ATLAS_SUBAGENT_MODEL \
+  -e ATLAS_FAST_MODEL \
+  -e ATLAS_REASONING_MODEL \
   -e ATLAS_SYSTEM_PROMPT \
   atlas-agent:latest "$@"
 WRAPPER

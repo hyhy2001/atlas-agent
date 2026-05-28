@@ -36,7 +36,7 @@ export async function startRepl(params: {
   compactionConfig?: CompactionConfig;
   startInPlanMode?: boolean;
   subagents?: SubagentProfile[];
-  subagentModel?: string;
+  fastModel?: string;
   hooks?: HooksConfig;
 }): Promise<void> {
   const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode, hooks } = params;
@@ -395,8 +395,8 @@ Keep it under 150 lines, concise and useful as AI context.`;
         controllerRef.current = controller;
         const subProvider = profile.model
           ? provider.withModel(profile.model)
-          : params.subagentModel
-            ? provider.withModel(params.subagentModel)
+          : params.fastModel
+            ? provider.withModel(params.fastModel)
             : provider;
 
         const result = await runAgentLoop({

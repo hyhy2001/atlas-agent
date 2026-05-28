@@ -50,9 +50,11 @@ chmod +x "$DIST_DIR/atlas-agent"
 cp "$PROJECT_DIR/scripts/setup.sh" "$DIST_DIR/setup.sh"
 chmod +x "$DIST_DIR/setup.sh"
 
-cat > "$DIST_DIR/config/config.json" <<'JSON'
+cat > "$DIST_DIR/config/settings.json" <<'JSON'
 {
   "model": "all",
+  "fastModel": "all",
+  "reasoningModel": "all",
   "mcpServers": [
     {
       "name": "codebase-memory",
@@ -87,10 +89,11 @@ Everything is contained in this directory — no root, no home dir writes.
   sessions/         Saved conversations
 
 Environment variables:
-  ATLAS_BASE_URL          Required. Your LLM proxy endpoint.
-  ATLAS_AUTH_TOKEN        Required. Your API token.
-  ATLAS_MODEL             Optional. Model name (default: "all").
-  ATLAS_SUBAGENT_MODEL    Optional. Cheaper model for subagents.
+  ATLAS_BASE_URL          Required. LLM proxy endpoint.
+  ATLAS_AUTH_TOKEN        Required. API token.
+  ATLAS_MODEL             Optional. Main model (default: "all").
+  ATLAS_FAST_MODEL        Optional. Fast/cheap model for executors.
+  ATLAS_REASONING_MODEL   Optional. Most capable model for deep investigation.
 
 In-agent commands: type /help inside the REPL.
 README

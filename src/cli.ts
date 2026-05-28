@@ -101,7 +101,7 @@ async function main() {
   if (!apiKey) {
     console.error(
       "Error: No API key found. Set ATLAS_AUTH_TOKEN or ATLAS_API_KEY environment variable,\n" +
-        "or add authToken to ~/.config/atlas-agent/config.json"
+        "or add authToken to ~/.config/atlas-agent/settings.json"
     );
     process.exit(1);
   }
@@ -166,9 +166,8 @@ async function main() {
   (ctx as any)._provider = provider;
   (ctx as any)._registry = toolRegistry;
   (ctx as any)._hooks = hooks;
-  (ctx as any)._mechModel = config.mechModel;
-  (ctx as any)._coderModel = config.coderModel;
-  (ctx as any)._rescueModel = config.rescueModel;
+  (ctx as any)._fastModel = config.fastModel;
+  (ctx as any)._reasoningModel = config.reasoningModel;
 
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
 
@@ -222,7 +221,7 @@ async function main() {
         commands,
         startInPlanMode: args.plan,
         subagents,
-        subagentModel: config.subagentModel,
+        fastModel: config.fastModel,
         hooks,
       });
     }

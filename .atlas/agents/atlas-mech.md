@@ -1,7 +1,7 @@
 ---
 name: atlas-mech
 description: Mechanical code executor — applies exact edits only
-model: ${ATLAS_SUBAGENT_MODEL}
+model: ${ATLAS_FAST_MODEL}
 allowed_tools: read_file, write_file, edit_file, bash
 restricted_tools: glob, grep, list_directory, web_fetch, delegate
 ---
