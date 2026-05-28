@@ -1,55 +1,105 @@
-# atlas-agent Project Instructions
+# Atlas — Project Instructions
 
 ## Project Overview
-atlas-agent is an agentic coding CLI built in TypeScript. It uses an OpenAI-compatible API (9router proxy) and pre-wires codebase-memory-mcp for code intelligence.
 
-atlas-agent uses a strict leader/executor architecture: the leader (main model) only orchestrates via delegate; all code reading/editing happens in executor subagents (atlas-swift, atlas-forge, atlas-deep).
+Atlas is an agentic coding CLI with a strict leader/executor architecture. The leader (main model) plans, delegates, and verifies — it never reads or edits code directly. All code work is delegated to executor subagents that run on cheaper/faster models.
+
+The CLI connects to any OpenAI-compatible API proxy (9router, Databricks, Azure OpenAI, Together, Groq) and pre-wires `codebase-memory-mcp` for graph-based code intelligence.
+
+## Architecture
+
+| Component | Role |
+|-----------|------|
+| Leader | Plans, delegates, verifies. 8 orchestration tools only. |
+| `atlas-swift` | Mechanical edits (exact old → new replacements). Fast model. |
+| `atlas-forge` | Default executor for features, refactors, tests. Fast model. |
+| `atlas-deep` | Deep investigation when other tiers fail. Reasoning model. |
+
+The leader uses `delegate` (single task) or `delegate_parallel` (multiple independent tasks).
 
 ## Tech Stack
-- TypeScript + Node.js >= 20, ESM (`"type": "module"`)
-- OpenAI SDK (`openai` package) — connects to any OpenAI-compatible proxy
-- MCP SDK (`@modelcontextprotocol/sdk`) — stdio client for codebase-memory-mcp
-- Zod v3 for config/tool schema validation
-- Vitest for testing
-- Bun for single-binary compilation
+
+- TypeScript on Node.js >= 20, ESM (`"type": "module"`)
+- `openai` SDK — connects to any OpenAI-compatible proxy
+- `@modelcontextprotocol/sdk` — stdio client for MCP servers
+- `zod` — config and tool schema validation
+- `vitest` — test framework
+- `bun` — single-binary compilation
+- `marked` + `marked-terminal` + `cli-highlight` — markdown rendering
+- `ora` — spinner during tool execution
+- `chalk` — terminal colors
+- `diff` — unified diffs in permission prompts
 
 ## Key Directories
+
 - `src/agent/` — agent loop, plan mode, compaction, subagents, system prompt
-- `src/provider/` — OpenAI provider wrapper
-- `src/tools/builtin/` — built-in tools (read_file, write_file, edit_file, bash, grep, glob, web_fetch, todo_read, todo_write, list_directory)
-- `src/mcp/` — MCP client (spawns codebase-memory-mcp)
-- `src/permissions/` — permission prompt, session, syntax highlighting
-- `src/hooks.ts` — lifecycle hooks (PreToolUse, PostToolUse, SessionStart, SessionEnd, UserPromptSubmit, Stop)
-- `src/sessions.ts` — conversation persistence
-- `src/headless.ts` — headless/one-shot mode (-p flag)
-- `scripts/` — build-binary.sh, setup.sh
+- `src/provider/` — OpenAI provider wrapper with streaming
+- `src/tools/builtin/` — built-in tools (read_file, write_file, edit_file, bash, grep, glob, list_directory, web_fetch, todo, memory, git, delegate)
+- `src/mcp/` — MCP client + server management
+- `src/permissions/` — permission prompts, session memory, syntax highlighting
+- `src/hooks.ts` — lifecycle hooks (Pre/PostToolUse, SessionStart/End, UserPromptSubmit, Stop)
+- `src/sessions.ts`, `src/memory.ts`, `src/telemetry.ts` — persistence layers
+- `src/headless.ts` — headless one-shot mode (`-p` flag)
+- `src/login.ts` — interactive login screen
+- `src/paths.ts` — centralized path resolution (portable-aware)
+- `src/repl.ts` — interactive REPL loop
+- `src/cli.ts` — CLI entry point
 
 ## Build & Run
+
 ```bash
-npm install          # install deps
-npm run build        # TypeScript compile → dist/
-npm run dev          # run without building (tsx)
-npm test             # run tests (vitest)
-npm run build:binary # compile to single Bun binary → release/
+make install        # First-time setup: deps + build + binary + symlink
+make build          # TypeScript compile only
+make build-all      # All 5 platform binaries
+make dev            # Run with tsx (no build)
+make test           # vitest
+make clean          # Remove build artifacts
 ```
 
 ## Environment Variables
-- `ATLAS_BASE_URL` — LLM proxy endpoint (required)
-- `ATLAS_AUTH_TOKEN` — API token (required)
-- `ATLAS_MODEL` — model name (default: "all")
-- `ATLAS_FAST_MODEL` — fast/cheap model for executors (atlas-swift, atlas-forge)
-- `ATLAS_REASONING_MODEL` — most capable model for deep investigation (atlas-deep)
-- `ATLAS_SYSTEM_PROMPT` — override system prompt
+
+- `ATLAS_BASE_URL` — LLM proxy endpoint (required if not in settings.json)
+- `ATLAS_AUTH_TOKEN` — API token (required if not in settings.json)
+- `ATLAS_MODEL` — main / leader model
+- `ATLAS_FAST_MODEL` — fast model for atlas-swift and atlas-forge
+- `ATLAS_REASONING_MODEL` — reasoning model for atlas-deep
+- `ATLAS_SYSTEM_PROMPT` — override the default system prompt
+
+If a tier-specific model is unset, the main model is used as fallback.
 
 ## Conventions
-- All imports use `.js` extension (NodeNext ESM resolution)
-- No default exports — named exports only
-- Tool definitions: `isDestructive: true` requires user permission
-- Tests in `test/*.test.js` (plain JS, not TS)
-- Never commit secrets or API keys
+
+- All TypeScript imports use the `.js` extension (NodeNext ESM resolution)
+- Named exports only — no default exports
+- Tools with `isDestructive: true` require user permission unless allowlisted in `.atlas/settings.json`
+- Tests in `test/*.test.js` (plain JavaScript, not TypeScript)
+- Never commit secrets, API keys, or session data
 
 ## Adding a New Tool
-1. Create `src/tools/builtin/<name>.ts` implementing `ToolDefinition`
-2. Export from `src/tools/builtin/index.ts`
-3. Add test in `test/`
-4. Run `npm run build && npm test`
+
+1. Create `src/tools/builtin/<name>.ts` implementing the `ToolDefinition` interface
+2. Export from `src/tools/builtin/index.ts` and add it to the `builtinTools` array
+3. If the tool should be available to the leader, add its name to `filterForLeader()` in `src/tools/registry.ts`
+4. Add a test under `test/`
+5. Run `npm run build && npm test`
+
+## Adding a Custom Subagent
+
+Create a markdown file at `.atlas/agents/<name>.md`:
+
+```markdown
+---
+name: rtl-reviewer
+description: Reviews Verilog/SystemVerilog for synthesis issues
+model: <optional-model-override>
+allowed_tools: read_file, grep, glob
+restricted_tools: write_file, edit_file, bash
+---
+
+You are an RTL reviewer. Analyze the code for:
+- Missing reset signals
+- Combinational loops
+- ...
+```
+
+Invoke from the REPL: `/agent rtl-reviewer`.
