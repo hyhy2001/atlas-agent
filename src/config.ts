@@ -11,7 +11,7 @@ const McpServerSchema = z.object({
 });
 
 const ConfigSchema = z.object({
-  model: z.string().default("gpt-4o"),
+  model: z.string().default("all"),
   subagentModel: z.string().optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
