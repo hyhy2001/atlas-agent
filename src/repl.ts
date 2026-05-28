@@ -351,6 +351,52 @@ export async function startRepl(params: {
       return true;
     }
 
+    if (input === "/model" || input.startsWith("/model ")) {
+      const arg = input.slice(6).trim();
+
+      if (!arg) {
+        // Show current models
+        console.log("Current models:");
+        console.log(`  main:      ${chalk.cyan(provider.getModel())}     (leader)`);
+        console.log(`  fast:      ${chalk.cyan(params.fastModel ?? "(uses main)")}     (atlas-swift, atlas-forge)`);
+        console.log(`  reasoning: ${chalk.cyan(process.env["ATLAS_REASONING_MODEL"] ?? "(uses main)")}     (atlas-deep)`);
+        console.log("\nUsage:");
+        console.log("  /model <name>              — change main model");
+        console.log("  /model main <name>         — change main model (leader)");
+        console.log("  /model fast <name>         — change fast model (atlas-swift, atlas-forge)");
+        console.log("  /model reasoning <name>    — change reasoning model (atlas-deep)");
+        return true;
+      }
+
+      const parts = arg.split(/\s+/);
+      let tier: "main" | "fast" | "reasoning" = "main";
+      let newModel = arg;
+
+      if (parts[0] === "main" || parts[0] === "fast" || parts[0] === "reasoning") {
+        tier = parts[0] as "main" | "fast" | "reasoning";
+        newModel = parts.slice(1).join(" ").trim();
+        if (!newModel) {
+          console.log(`Usage: /model ${tier} <name>`);
+          return true;
+        }
+      }
+
+      if (tier === "main") {
+        // Replace provider with one using new model
+        const newProvider = provider.withModel(newModel);
+        Object.assign(provider, newProvider);
+        console.log(chalk.green(`✓ Main model: ${newModel}`));
+      } else if (tier === "fast") {
+        params.fastModel = newModel;
+        process.env["ATLAS_FAST_MODEL"] = newModel;
+        console.log(chalk.green(`✓ Fast model: ${newModel}`));
+      } else if (tier === "reasoning") {
+        process.env["ATLAS_REASONING_MODEL"] = newModel;
+        console.log(chalk.green(`✓ Reasoning model: ${newModel}`));
+      }
+      return true;
+    }
+
     if (input === "/init" || input === "/init --force") {
       const force = input.includes("--force");
       const atlasPath = path.join(process.cwd(), "ATLAS.md");
@@ -401,6 +447,7 @@ Keep it under 150 lines, concise and useful as AI context.`;
       console.log("  /worktree   — Manage git worktrees (list/create/enter/exit/remove)");
       console.log("  /agent <name>  — Invoke a subagent for one turn");
       console.log("  /agents        — List available subagents");
+      console.log("  /model [tier] [name] — Show/change models (main, fast, reasoning)");
       console.log("  /help       — Show this help");
       console.log("\nMulti-line: type ``` to start/end a block, or end a line with \\ to continue");
       if (commands && commands.length > 0) {
