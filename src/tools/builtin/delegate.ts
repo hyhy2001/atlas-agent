@@ -43,6 +43,92 @@ interface DelegateInput {
   test_command?: string;
 }
 
+interface ParallelTask {
+  agent: "atlas-mech" | "atlas-coder" | "atlas-rescue";
+  task: string;
+  files?: string[];
+  build_command?: string;
+  test_command?: string;
+}
+
+async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext): Promise<string> {
+  const provider = (ctx as any)._provider as OpenAIProvider;
+  const registry = (ctx as any)._registry as ToolRegistry;
+  const hooks = (ctx as any)._hooks;
+
+  if (!provider || !registry) {
+    return "Error: delegation not available (provider/registry not set)";
+  }
+
+  let systemPrompt: string;
+  let subProvider: OpenAIProvider;
+
+  const fastModel = (ctx as any)._fastModel || process.env["ATLAS_FAST_MODEL"];
+  const reasoningModel = (ctx as any)._reasoningModel || process.env["ATLAS_REASONING_MODEL"];
+
+  switch (task.agent) {
+    case "atlas-mech":
+      systemPrompt = ATLAS_MECH_PROMPT;
+      subProvider = fastModel ? provider.withModel(fastModel) : provider;
+      break;
+    case "atlas-coder":
+      systemPrompt = ATLAS_CODER_PROMPT;
+      subProvider = fastModel ? provider.withModel(fastModel) : provider;
+      break;
+    case "atlas-rescue":
+      systemPrompt = ATLAS_RESCUE_PROMPT;
+      subProvider = reasoningModel ? provider.withModel(reasoningModel) : provider;
+      break;
+  }
+
+  let fullTask = task.task;
+  if (task.files?.length) fullTask += `\n\nRelevant files: ${task.files.join(", ")}`;
+  if (task.build_command) fullTask += `\n\nAfter changes, run build: ${task.build_command}`;
+  if (task.test_command) fullTask += `\n\nAfter changes, run tests: ${task.test_command}`;
+
+  const messages: Message[] = [{ role: "user", content: fullTask }];
+
+  let subRegistry = registry;
+  if (task.agent === "atlas-mech") {
+    subRegistry = new ToolRegistry();
+    const allowed = ["read_file", "write_file", "edit_file", "bash"];
+    for (const tool of registry.getAll()) {
+      if (allowed.includes(tool.name)) subRegistry.register(tool);
+    }
+  }
+
+  const { PermissionSession } = await import("../../permissions/session.js");
+  const subPermissions = new PermissionSession();
+  subPermissions.grant("bash");
+  subPermissions.grant("write_file");
+  subPermissions.grant("edit_file");
+
+  const subCtx: ExecutionContext = {
+    workingDir: ctx.workingDir,
+    abortSignal: ctx.abortSignal,
+    permissions: subPermissions,
+  };
+
+  const subExecutor = new ToolExecutor(subRegistry, subCtx, hooks);
+
+  try {
+    await runAgentLoop({
+      provider: subProvider,
+      messages,
+      toolRegistry: subRegistry,
+      executor: subExecutor,
+      systemPrompt,
+      abortSignal: ctx.abortSignal,
+    });
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
+  const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+  const result = (lastAssistant && lastAssistant.content) ? lastAssistant.content : "(no response)";
+  return result;
+}
+
 export const delegateTool: ToolDefinition = {
   name: "delegate",
   description: "Delegate a coding task to a subagent. Use atlas-mech for mechanical edits (exact old→new), atlas-coder for features/refactors/tests, atlas-rescue when coder has failed twice.",
@@ -77,98 +163,58 @@ export const delegateTool: ToolDefinition = {
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const { agent, task, files, build_command, test_command } = input as DelegateInput;
 
-    const provider = (ctx as any)._provider as OpenAIProvider;
-    const registry = (ctx as any)._registry as ToolRegistry;
-    const hooks = (ctx as any)._hooks;
-
-    if (!provider || !registry) {
-      return { toolUseId: "", content: "Error: delegation not available (provider/registry not set)", isError: true };
-    }
-
-    let systemPrompt: string;
-    let subProvider: OpenAIProvider;
-
-    const fastModel = (ctx as any)._fastModel || process.env["ATLAS_FAST_MODEL"];
-    const reasoningModel = (ctx as any)._reasoningModel || process.env["ATLAS_REASONING_MODEL"];
-
-    switch (agent) {
-      case "atlas-mech":
-        systemPrompt = ATLAS_MECH_PROMPT;
-        subProvider = fastModel ? provider.withModel(fastModel) : provider;
-        break;
-      case "atlas-coder":
-        systemPrompt = ATLAS_CODER_PROMPT;
-        subProvider = fastModel ? provider.withModel(fastModel) : provider;
-        break;
-      case "atlas-rescue":
-        systemPrompt = ATLAS_RESCUE_PROMPT;
-        subProvider = reasoningModel ? provider.withModel(reasoningModel) : provider;
-        break;
-    }
-
-    let fullTask = task;
-    if (files && files.length > 0) {
-      fullTask += `\n\nRelevant files: ${files.join(", ")}`;
-    }
-    if (build_command) {
-      fullTask += `\n\nAfter changes, run build: ${build_command}`;
-    }
-    if (test_command) {
-      fullTask += `\n\nAfter changes, run tests: ${test_command}`;
-    }
-
-    const messages: Message[] = [
-      { role: "user", content: fullTask },
-    ];
-
-    let subRegistry = registry;
-    if (agent === "atlas-mech") {
-      subRegistry = new ToolRegistry();
-      const allowed = ["read_file", "write_file", "edit_file", "bash"];
-      for (const tool of registry.getAll()) {
-        if (allowed.includes(tool.name)) {
-          subRegistry.register(tool);
-        }
-      }
-    }
-
-    const { PermissionSession } = await import("../../permissions/session.js");
-    const subPermissions = new PermissionSession();
-    subPermissions.grant("bash");
-    subPermissions.grant("write_file");
-    subPermissions.grant("edit_file");
-
-    const subCtx: ExecutionContext = {
-      workingDir: ctx.workingDir,
-      abortSignal: ctx.abortSignal,
-      permissions: subPermissions,
-    };
-
-    const subExecutor = new ToolExecutor(subRegistry, subCtx, hooks);
-
-    let output = "";
-    const originalWrite = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: any) => {
-      output += typeof chunk === "string" ? chunk : chunk.toString();
-      return true;
-    }) as any;
-
-    try {
-      await runAgentLoop({
-        provider: subProvider,
-        messages,
-        toolRegistry: subRegistry,
-        executor: subExecutor,
-        systemPrompt,
-        abortSignal: ctx.abortSignal,
-      });
-    } catch (err) {
-      output += `\nError: ${err instanceof Error ? err.message : String(err)}`;
-    } finally {
-      process.stdout.write = originalWrite;
-    }
-
-    const result = output.trim() || "(subagent completed with no text output)";
+    const result = await executeSingleDelegate({ agent, task, files, build_command, test_command }, ctx);
     return { toolUseId: "", content: result.slice(0, 50000), isError: false };
+  },
+};
+
+export const delegateParallelTool: ToolDefinition = {
+  name: "delegate_parallel",
+  description: "Run multiple subagent tasks in parallel. Use when tasks are independent (different files/modules). Results are collected and returned together.",
+  inputSchema: {
+    properties: {
+      tasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            agent: { type: "string", enum: ["atlas-mech", "atlas-coder", "atlas-rescue"] },
+            task: { type: "string", description: "Self-contained task description" },
+            files: { type: "array", items: { type: "string" } },
+            build_command: { type: "string" },
+            test_command: { type: "string" },
+          },
+          required: ["agent", "task"],
+        },
+        description: "Array of independent tasks to run in parallel",
+      },
+    },
+    required: ["tasks"],
+  },
+  isDestructive: false,
+  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
+    const { tasks } = input as { tasks: ParallelTask[] };
+
+    if (!tasks || tasks.length === 0) {
+      return { toolUseId: "", content: "Error: no tasks provided", isError: true };
+    }
+
+    const results = await Promise.all(
+      tasks.map(async (t, i) => {
+        try {
+          const result = await executeSingleDelegate(t, ctx);
+          return `## Task ${i + 1}: ${t.agent} — ${t.task.slice(0, 60)}\n\n${result}`;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `## Task ${i + 1}: ${t.agent} — ERROR\n\n${msg}`;
+        }
+      })
+    );
+
+    return {
+      toolUseId: "",
+      content: results.join("\n\n---\n\n"),
+      isError: false,
+    };
   },
 };

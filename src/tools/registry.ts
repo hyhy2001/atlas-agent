@@ -44,6 +44,7 @@ export class ToolRegistry {
     const filtered = new ToolRegistry();
     const leaderTools = new Set([
       "delegate",
+      "delegate_parallel",
       "web_fetch",
       "todo_read",
       "todo_write",
