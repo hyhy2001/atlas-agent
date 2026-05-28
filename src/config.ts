@@ -62,18 +62,14 @@ function resolveMcpCommands(
 }
 
 export function loadConfig(overrides?: Partial<Config>): Config {
-  const globalPath = paths.config();
+  const configPath = paths.config();
   const localPath = join(process.cwd(), ".atlas-agent.json");
 
-  const portableDir = getPortableRoot();
-  const portablePath = portableDir ? paths.config() : null;
-
-  const globalConfig = loadJsonFile(globalPath);
-  const portableConfig = portablePath ? loadJsonFile(portablePath) : {};
+  const mainConfig = loadJsonFile(configPath);
   const localConfig = loadJsonFile(localPath);
 
-  // Layered merge: global < portable < local
-  const merged = { ...globalConfig, ...portableConfig, ...localConfig };
+  // Merge: .atlas/settings.json < .atlas-agent.json (project override)
+  const merged = { ...mainConfig, ...localConfig };
 
   if (process.env["ATLAS_BASE_URL"]) {
     merged.baseURL = process.env["ATLAS_BASE_URL"];
@@ -97,10 +93,8 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   const config = ConfigSchema.parse(merged);
 
-  if (portableDir) {
-    const resolved = resolveMcpCommands(config.mcpServers, portableDir);
-    return { ...config, mcpServers: resolved };
-  }
+  const resolved = resolveMcpCommands(config.mcpServers, atlasRoot());
+  return { ...config, mcpServers: resolved };
 
   return config;
 }

@@ -1,0 +1,13 @@
+{
+  "id": "20260528-214759-30e4",
+  "createdAt": "2026-05-28T14:47:59.292Z",
+  "updatedAt": "2026-05-28T14:47:59.292Z",
+  "model": "test-model",
+  "messageCount": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ]
+}

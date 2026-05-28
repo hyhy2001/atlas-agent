@@ -33,7 +33,7 @@ export async function loadSettings(cwd: string): Promise<SettingsConfig> {
   };
   const allowedTools: string[] = [];
 
-  const globalPath = paths.hooks();
+  const globalPath = paths.config();
   const localPath = join(cwd, ".atlas", "settings.json");
 
   for (const filePath of [globalPath, localPath]) {

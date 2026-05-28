@@ -53,12 +53,12 @@ export async function interactiveLogin(): Promise<Credentials | null> {
     }
 
     console.log("");
-    const save = await prompt(rl, chalk.white("Save to config/settings.json?") + chalk.gray(" [Y/n]: "));
+    const save = await prompt(rl, chalk.white("Save to .atlas/settings.json?") + chalk.gray(" [Y/n]: "));
     rl.close();
 
     if (save.toLowerCase() !== "n") {
       saveCredentials({ baseURL, authToken });
-      console.log(chalk.green("✓ Credentials saved to config/settings.json"));
+      console.log(chalk.green("✓ Credentials saved to .atlas/settings.json"));
     }
 
     console.log("");

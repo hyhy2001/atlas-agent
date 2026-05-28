@@ -5,6 +5,8 @@ deps/
 *.tsbuildinfo
 .env
 *.log
-sessions/
-cache/
-telemetry/
+.atlas/sessions/
+.atlas/cache/
+.atlas/telemetry/
+.atlas/memory/
+.atlas/bin/

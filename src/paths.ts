@@ -6,19 +6,19 @@ export function getAtlasRoot(): string {
   const exe = process.execPath;
   const script = process.argv[1];
 
-  const isBunBinary = !exe.includes("node") && !exe.includes("bun") && existsSync(exe);
-
+  // Check portable: .atlas/settings.json next to binary or script
   const candidates = [
     dirname(resolve(exe)),
     dirname(resolve(script || "")),
   ];
 
   for (const dir of candidates) {
-    if (existsSync(join(dir, "config", "settings.json"))) {
+    if (existsSync(join(dir, ".atlas", "settings.json"))) {
       return dir;
     }
   }
 
+  // Dev mode: cwd has package.json (we're in the project)
   const cwd = process.cwd();
   const scriptPath = script ? resolve(script) : "";
   const isDevCli = scriptPath.endsWith(join("dist", "cli.js")) || scriptPath.endsWith(join("src", "cli.ts"));
@@ -26,7 +26,8 @@ export function getAtlasRoot(): string {
     return cwd;
   }
 
-  return join(homedir(), ".config", "atlas-agent");
+  // Fallback: home dir
+  return join(homedir(), ".atlas-agent");
 }
 
 let _root: string | null = null;
@@ -35,15 +36,16 @@ export function atlasRoot(): string {
   return _root;
 }
 
+// All paths under .atlas/
 export const paths = {
-  root:      () => atlasRoot(),
-  config:    () => join(atlasRoot(), "config", "settings.json"),
-  sessions:  () => join(atlasRoot(), "sessions"),
-  telemetry: () => join(atlasRoot(), "telemetry"),
-  cache:     () => join(atlasRoot(), "cache"),
-  memory:    () => join(atlasRoot(), ".atlas", "memory"),
-  hooks:     () => join(atlasRoot(), ".atlas", "settings.json"),
-  commands:  () => join(atlasRoot(), ".atlas", "commands"),
-  agents:    () => join(atlasRoot(), ".atlas", "agents"),
-  bin:       () => join(atlasRoot(), "bin"),
+  root:       () => atlasRoot(),
+  atlas:      () => join(atlasRoot(), ".atlas"),
+  config:     () => join(atlasRoot(), ".atlas", "settings.json"),
+  sessions:   () => join(atlasRoot(), ".atlas", "sessions"),
+  telemetry:  () => join(atlasRoot(), ".atlas", "telemetry"),
+  cache:      () => join(atlasRoot(), ".atlas", "cache"),
+  memory:     () => join(atlasRoot(), ".atlas", "memory"),
+  commands:   () => join(atlasRoot(), ".atlas", "commands"),
+  agents:     () => join(atlasRoot(), ".atlas", "agents"),
+  bin:        () => join(atlasRoot(), ".atlas", "bin"),
 };
