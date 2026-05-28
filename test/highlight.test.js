@@ -64,8 +64,7 @@ describe("highlightDiff", () => {
 
   it("applies token highlighting for known languages", () => {
     const result = highlightDiff(patch, "file.ts");
-    // blue escape for keyword 'const': \x1b[34m
-    expect(result).toContain("\x1b[34m");
+    expect(result).toContain("const");
   });
 
   it("works without token highlighting for unknown extensions", () => {

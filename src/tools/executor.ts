@@ -1,8 +1,43 @@
+import ora from "ora";
 import type { ToolResult, ExecutionContext } from "./types.js";
 import type { ToolRegistry } from "./registry.js";
 import { askPermission } from "../permissions/prompt.js";
 import type { HooksConfig } from "../hooks.js";
 import { matchHooks, buildHookEnv, runHook } from "../hooks.js";
+
+function getToolSummary(name: string, input: unknown): string {
+  const inp = input as Record<string, unknown>;
+  switch (name) {
+    case "bash":
+      return `bash: ${(inp.command as string)?.slice(0, 60) ?? ""}`;
+    case "read_file":
+      return `read: ${inp.path ?? ""}`;
+    case "write_file":
+      return `write: ${inp.path ?? ""}`;
+    case "edit_file":
+      return `edit: ${inp.path ?? ""}`;
+    case "grep":
+      return `grep: ${inp.pattern ?? ""}`;
+    case "glob":
+      return `glob: ${inp.pattern ?? ""}`;
+    case "git_status":
+      return "git status";
+    case "git_diff":
+      return `git diff${inp.path ? `: ${inp.path}` : ""}`;
+    case "git_log":
+      return "git log";
+    case "git_commit":
+      return `git commit: ${(inp.message as string)?.slice(0, 40) ?? ""}`;
+    case "list_directory":
+      return `ls: ${inp.path ?? "."}`;
+    case "web_fetch":
+      return `fetch: ${(inp.url as string)?.slice(0, 50) ?? ""}`;
+    case "delegate":
+      return `delegate → ${inp.agent ?? ""}`;
+    default:
+      return name;
+  }
+}
 
 export class ToolExecutor {
   private registry: ToolRegistry;
@@ -58,6 +93,9 @@ export class ToolExecutor {
     if (!tool) {
       return { toolUseId: block.id, content: `Unknown tool: ${block.name}`, isError: true };
     }
+
+    const useSpinner = process.stdout.isTTY;
+
     try {
       // Run pre-hooks
       const pre = matchHooks(this.hooks.PreToolUse, block.name);
@@ -69,17 +107,40 @@ export class ToolExecutor {
         }
       }
 
-      const result = await tool.execute(block.input, this.ctx);
+      if (useSpinner) {
+        const spinnerText = getToolSummary(block.name, block.input);
+        const spinner = ora({ text: spinnerText, color: "cyan", spinner: "dots" }).start();
+        try {
+          const result = await tool.execute(block.input, this.ctx);
+          spinner.succeed(block.name);
 
-      // Run post hooks (best-effort)
-      const post = matchHooks(this.hooks.PostToolUse, block.name);
-      for (const hook of post) {
-        const env = buildHookEnv(block.name, block.input);
-        // best-effort
-        await runHook(hook, env).catch(() => {});
+          // Run post hooks (best-effort)
+          const post = matchHooks(this.hooks.PostToolUse, block.name);
+          for (const hook of post) {
+            const env = buildHookEnv(block.name, block.input);
+            // best-effort
+            await runHook(hook, env).catch(() => {});
+          }
+
+          return { ...result, toolUseId: block.id };
+        } catch (err) {
+          spinner.fail(block.name);
+          const msg = err instanceof Error ? err.message : String(err);
+          return { toolUseId: block.id, content: `Error: ${msg}`, isError: true };
+        }
+      } else {
+        const result = await tool.execute(block.input, this.ctx);
+
+        // Run post hooks (best-effort)
+        const post = matchHooks(this.hooks.PostToolUse, block.name);
+        for (const hook of post) {
+          const env = buildHookEnv(block.name, block.input);
+          // best-effort
+          await runHook(hook, env).catch(() => {});
+        }
+
+        return { ...result, toolUseId: block.id };
       }
-
-      return { ...result, toolUseId: block.id };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { toolUseId: block.id, content: `Error: ${msg}`, isError: true };
@@ -113,28 +174,63 @@ export class ToolExecutor {
       }
     }
 
+    const useSpinner = process.stdout.isTTY;
+
     try {
       // Run pre-hooks (after permission granted)
       const pre = matchHooks(this.hooks.PreToolUse, block.name);
-      for (const hook of pre) {
-        const env = buildHookEnv(block.name, block.input);
-        const hres = await runHook(hook, env);
-        if (hres.exitCode !== 0) {
-          return { toolUseId: block.id, content: `Blocked by PreToolUse hook: ${hres.stdout}`, isError: true };
+
+      if (useSpinner) {
+        const spinnerText = getToolSummary(block.name, block.input);
+        const spinner = ora({ text: spinnerText, color: "yellow", spinner: "dots" }).start();
+        try {
+          for (const hook of pre) {
+            const env = buildHookEnv(block.name, block.input);
+            const hres = await runHook(hook, env);
+            if (hres.exitCode !== 0) {
+              spinner.fail(block.name);
+              return { toolUseId: block.id, content: `Blocked by PreToolUse hook: ${hres.stdout}`, isError: true };
+            }
+          }
+
+          const result = await tool.execute(block.input, this.ctx);
+          spinner.succeed(block.name);
+
+          // Run post hooks (best-effort)
+          const post = matchHooks(this.hooks.PostToolUse, block.name);
+          for (const hook of post) {
+            const env = buildHookEnv(block.name, block.input);
+            // best-effort
+            await runHook(hook, env).catch(() => {});
+          }
+
+          return { ...result, toolUseId: block.id };
+        } catch (err) {
+          spinner.fail(block.name);
+          const msg = err instanceof Error ? err.message : String(err);
+          return { toolUseId: block.id, content: `Error: ${msg}`, isError: true };
         }
+      } else {
+        for (const hook of pre) {
+          const env = buildHookEnv(block.name, block.input);
+          const hres = await runHook(hook, env);
+          if (hres.exitCode !== 0) {
+            return { toolUseId: block.id, content: `Blocked by PreToolUse hook: ${hres.stdout}`, isError: true };
+          }
+        }
+
+        const result = await tool.execute(block.input, this.ctx);
+
+        // Run post hooks (best-effort)
+        const post = matchHooks(this.hooks.PostToolUse, block.name);
+        for (const hook of post) {
+          const env = buildHookEnv(block.name, block.input);
+          // best-effort
+          await runHook(hook, env).catch(() => {});
+        }
+
+        return { ...result, toolUseId: block.id };
       }
-
-      const result = await tool.execute(block.input, this.ctx);
-
-      // Run post hooks (best-effort)
-      const post = matchHooks(this.hooks.PostToolUse, block.name);
-      for (const hook of post) {
-        const env = buildHookEnv(block.name, block.input);
-        // best-effort
-        await runHook(hook, env).catch(() => {});
-      }
-
-      return { ...result, toolUseId: block.id };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { toolUseId: block.id, content: `Error: ${msg}`, isError: true };
