@@ -1,6 +1,6 @@
 {
   "name": "atlas-agent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Agentic coding CLI with MCP integration",
   "type": "module",
   "bin": {

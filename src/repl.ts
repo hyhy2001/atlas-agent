@@ -56,7 +56,7 @@ export async function startRepl(params: {
   const totalTools = params.totalToolCount ?? leaderTools;
   const model = provider.getModel();
 
-  console.log(`atlas-agent v0.1.0 | ${leaderTools} leader / ${totalTools} total tools | model: ${model}`);
+  console.log(`atlas-agent v1.0.0 | ${leaderTools} leader / ${totalTools} total tools | model: ${model}`);
   console.log('Type "exit" or "quit" to leave. /help for commands.\n');
 
   const allCommandNames = [
@@ -89,49 +89,58 @@ export async function startRepl(params: {
 
   const readInput = (): Promise<string | null> =>
     new Promise((resolve) => {
+      if (!process.stdin.readable || (rl as any).closed) {
+        resolve(null);
+        return;
+      }
       const planPrefix = planMode.isActive() ? "[plan] " : "";
-      rl.question(`${planPrefix}> `, (firstLine) => {
-        if (firstLine === null) { resolve(null); return; }
-        const trimmed = firstLine.trim();
+      try {
+        rl.question(`${planPrefix}> `, (firstLine) => {
+          if (firstLine === null) { resolve(null); return; }
+          const trimmed = firstLine.trim();
 
-        // Triple backtick mode
-        if (isMultilineStart(trimmed)) {
-          const lines: string[] = [];
-          process.stdout.write(chalk.gray("... "));
-          const collectLine = () => {
-            rl.question("... ", (line) => {
-              if (isMultilineEnd(line.trim())) {
-                resolve(lines.join("\n"));
-              } else {
-                lines.push(line);
-                collectLine();
-              }
-            });
-          };
-          collectLine();
-          return;
-        }
+          // Triple backtick mode
+          if (isMultilineStart(trimmed)) {
+            const lines: string[] = [];
+            process.stdout.write(chalk.gray("... "));
+            const collectLine = () => {
+              rl.question("... ", (line) => {
+                if (isMultilineEnd(line.trim())) {
+                  resolve(lines.join("\n"));
+                } else {
+                  lines.push(line);
+                  collectLine();
+                }
+              });
+            };
+            collectLine();
+            return;
+          }
 
-        // Backslash continuation
-        if (shouldContinue(trimmed)) {
-          const lines: string[] = [stripContinuation(trimmed)];
-          const collectLine = () => {
-            rl.question("... ", (line) => {
-              if (shouldContinue(line.trim())) {
-                lines.push(stripContinuation(line.trim()));
-                collectLine();
-              } else {
-                lines.push(line);
-                resolve(lines.join("\n"));
-              }
-            });
-          };
-          collectLine();
-          return;
-        }
+          // Backslash continuation
+          if (shouldContinue(trimmed)) {
+            const lines: string[] = [stripContinuation(trimmed)];
+            const collectLine = () => {
+              rl.question("... ", (line) => {
+                if (shouldContinue(line.trim())) {
+                  lines.push(stripContinuation(line.trim()));
+                  collectLine();
+                } else {
+                  lines.push(line);
+                  resolve(lines.join("\n"));
+                }
+              });
+            };
+            collectLine();
+            return;
+          }
 
-        resolve(firstLine);
-      });
+          resolve(firstLine);
+        });
+      } catch {
+        resolve(null);
+        return;
+      }
       rl.once("close", () => resolve(null));
     });
 
