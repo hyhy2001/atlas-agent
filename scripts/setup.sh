@@ -8,24 +8,55 @@ SESSIONS_DIR="$SCRIPT_DIR/sessions"
 echo "=== atlas-agent setup ==="
 mkdir -p "$BIN_DIR" "$CACHE_DIR" "$SESSIONS_DIR"
 
-echo "[1/1] Downloading codebase-memory-mcp..."
-if [ -f "$BIN_DIR/codebase-memory-mcp" ]; then
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$OS" in
+  Linux)  OS_NAME="linux" ;;
+  Darwin) OS_NAME="macos" ;;
+  MINGW*|MSYS*|CYGWIN*) OS_NAME="windows" ;;
+  *) echo "Unsupported OS: $OS"; exit 1 ;;
+esac
+
+case "$ARCH" in
+  x86_64|amd64) ARCH_NAME="x86_64" ;;
+  aarch64|arm64) ARCH_NAME="aarch64" ;;
+  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+echo "Detected: ${OS_NAME} ${ARCH_NAME}"
+echo ""
+
+BINARY_NAME="codebase-memory-mcp"
+[ "$OS_NAME" = "windows" ] && BINARY_NAME="codebase-memory-mcp.exe"
+
+echo "[1/1] Installing codebase-memory-mcp..."
+if [ -f "$BIN_DIR/$BINARY_NAME" ]; then
   echo "  Already exists. Skipping."
 else
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64) ARCH_NAME="linux-x86_64" ;;
-    aarch64|arm64) ARCH_NAME="linux-aarch64" ;;
-    *) echo "Unsupported: $ARCH"; exit 1 ;;
+  case "${OS_NAME}-${ARCH_NAME}" in
+    linux-x86_64)   ASSET="codebase-memory-mcp-linux-x86_64.tar.gz" ;;
+    linux-aarch64)  ASSET="codebase-memory-mcp-linux-aarch64.tar.gz" ;;
+    macos-aarch64)  ASSET="codebase-memory-mcp-macos-aarch64.tar.gz" ;;
+    macos-x86_64)   ASSET="codebase-memory-mcp-macos-x86_64.tar.gz" ;;
+    windows-x86_64) ASSET="codebase-memory-mcp-windows-x86_64.zip" ;;
+    *) echo "  No pre-built binary for ${OS_NAME}-${ARCH_NAME}. Skipping MCP."; exit 0 ;;
   esac
-  URL="https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/codebase-memory-mcp-${ARCH_NAME}.tar.gz"
-  if curl -fsSL "$URL" -o /tmp/cbm.tar.gz; then
-    tar -xzf /tmp/cbm.tar.gz -C "$BIN_DIR"
-    chmod +x "$BIN_DIR/codebase-memory-mcp" 2>/dev/null || true
-    rm -f /tmp/cbm.tar.gz
-    echo "  Installed."
+
+  URL="https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/${ASSET}"
+  echo "  Downloading: $URL"
+  TMPFILE="/tmp/cbm-download.$$"
+  if curl -fsSL "$URL" -o "$TMPFILE"; then
+    case "$ASSET" in
+      *.tar.gz) tar -xzf "$TMPFILE" -C "$BIN_DIR" ;;
+      *.zip)    unzip -o "$TMPFILE" -d "$BIN_DIR" >/dev/null ;;
+    esac
+    chmod +x "$BIN_DIR/$BINARY_NAME" 2>/dev/null || true
+    rm -f "$TMPFILE"
+    echo "  Installed: $BIN_DIR/$BINARY_NAME"
   else
-    echo "  Warning: download failed. Agent will work without code intelligence."
+    rm -f "$TMPFILE"
+    echo "  Warning: download failed. atlas-agent will work without code intelligence."
   fi
 fi
 

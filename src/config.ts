@@ -60,6 +60,12 @@ function resolveMcpCommands(
       if (existsSync(candidate)) {
         return { ...s, command: candidate };
       }
+      if (process.platform === "win32") {
+        const withExe = candidate + ".exe";
+        if (existsSync(withExe)) {
+          return { ...s, command: withExe };
+        }
+      }
     }
     return s;
   });
