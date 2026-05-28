@@ -2,6 +2,7 @@ import type { MessageParam, ToolCall } from "../provider/types.js";
 import type { OpenAIProvider } from "../provider/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
+import { MarkdownRenderer } from "../markdown.js";
 
 export interface LoopResult {
   inputTokens: number;
@@ -27,12 +28,14 @@ export async function runAgentLoop(params: {
     const toolCalls: ToolCall[] = [];
     let currentToolCall: { id: string; name: string; args: string } | null = null;
     let assistantContent = "";
+    const renderer = new MarkdownRenderer();
 
     for await (const delta of provider.stream(messages, tools, systemPrompt)) {
       if (abortSignal.aborted) break;
 
       if (delta.type === "text" && delta.text) {
-        process.stdout.write(delta.text);
+        const rendered = renderer.write(delta.text);
+        if (rendered) process.stdout.write(rendered);
         assistantContent += delta.text;
       } else if (delta.type === "tool_call_start") {
         if (currentToolCall) {
@@ -62,6 +65,9 @@ export async function runAgentLoop(params: {
         }
       }
     }
+
+    const flushed = renderer.flush();
+    if (flushed) process.stdout.write(flushed);
 
     totalInputTokens += Math.ceil(JSON.stringify(messages).length / 4);
     totalOutputTokens += Math.ceil((assistantContent.length + JSON.stringify(toolCalls).length) / 4);

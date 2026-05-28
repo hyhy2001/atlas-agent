@@ -24,6 +24,7 @@ import chalk from "chalk";
 import { isMultilineStart, isMultilineEnd, shouldContinue, stripContinuation } from "./multiline.js";
 import { filterRegistryForSubagent, getSubagent, listSubagents, type SubagentProfile } from "./agent/subagents.js";
 import { runLifecycleHooks, type HooksConfig } from "./hooks.js";
+import { createCompleter } from "./completion.js";
 
 export async function startRepl(params: {
   provider: OpenAIProvider;
@@ -56,9 +57,28 @@ export async function startRepl(params: {
   console.log(`atlas-agent v0.1.0 | ${leaderTools} leader / ${totalTools} total tools | model: ${model}`);
   console.log('Type "exit" or "quit" to leave. /help for commands.\n');
 
+  const allCommandNames = [
+    "save", "sessions", "load", "clear", "help", "context",
+    "plan", "execute", "compact", "cost", "init", "diff", "undo",
+    "agent", "agents", "model", "doctor",
+    ...(commands ?? []).map(c => c.name),
+  ];
+
+  const subagentNames = [
+    "atlas-mech", "atlas-coder", "atlas-rescue",
+    ...(params.subagents ?? []).map(s => s.name),
+  ];
+
+  const completer = createCompleter({
+    commands: allCommandNames,
+    subagentNames,
+    cwd: process.cwd(),
+  });
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
+    completer,
   });
 
   let messages: MessageParam[] = initialSession?.messages ?? [];
