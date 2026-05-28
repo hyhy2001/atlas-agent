@@ -13,6 +13,7 @@ import { listSessions, loadSession } from "./sessions.js";
 import { loadProjectContext, findProjectContextPath } from "./agent/context_loader.js";
 import { loadCommands } from "./commands.js";
 import { loadCustomSubagents, BUILTIN_SUBAGENTS } from "./agent/subagents.js";
+import { interactiveLogin, hasCredentials } from "./login.js";
 import type { ExecutionContext } from "./tools/types.js";
 
 function parseArgs(argv: string[]): {
@@ -135,13 +136,20 @@ async function main() {
     console.log(`Loaded ${memory.length} memory entries`);
   }
 
-  const apiKey = config.authToken || process.env["ATLAS_API_KEY"] || "";
+  let apiKey = config.authToken || process.env["ATLAS_API_KEY"] || "";
+  let baseURLOverride = config.baseURL;
+
   if (!apiKey) {
-    console.error(
-      "Error: No API key found. Set ATLAS_AUTH_TOKEN or ATLAS_API_KEY environment variable,\n" +
-        "or add authToken to config/settings.json"
-    );
-    process.exit(1);
+    const creds = await interactiveLogin();
+    if (!creds) {
+      console.error("Login cancelled.");
+      process.exit(1);
+    }
+    apiKey = creds.authToken;
+    baseURLOverride = creds.baseURL;
+    // Reload config to pick up saved credentials
+    const updatedConfig = loadConfig(args.model ? { model: args.model } : undefined);
+    if (!apiKey) apiKey = updatedConfig.authToken || "";
   }
 
   // Handle --continue / --resume flags
@@ -171,7 +179,7 @@ async function main() {
   const provider = new OpenAIProvider({
     apiKey,
     model: config.model,
-    baseURL: config.baseURL,
+    baseURL: baseURLOverride || config.baseURL,
   });
 
   const mcpClients: McpClient[] = [];
