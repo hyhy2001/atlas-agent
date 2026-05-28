@@ -318,6 +318,8 @@ Keep it under 150 lines, concise and useful as AI context.`;
       console.log("  /cost       — Show token usage and estimated cost");
       console.log("  /init       — Generate ATLAS.md for this project");
       console.log("  /context    — Show loaded project context path");
+      console.log("  /diff [path] — Show git diff (optionally for specific file)");
+      console.log("  /undo       — Revert last file change made by agent");
       console.log("  /agent <name>  — Invoke a subagent for one turn");
       console.log("  /agents        — List available subagents");
       console.log("  /help       — Show this help");
@@ -476,6 +478,48 @@ Keep it under 150 lines, concise and useful as AI context.`;
         process.stdout.write("\n");
         return true;
       }
+    }
+
+    if (input === "/diff" || input.startsWith("/diff ")) {
+      const arg = input.slice(5).trim();
+      const { spawn } = await import("node:child_process");
+      const args = ["diff", "--color=always"];
+      if (arg) args.push("--", arg);
+      const child = spawn("git", args, { cwd: process.cwd() });
+      let output = "";
+      child.stdout.on("data", (d) => { output += d.toString(); });
+      child.stderr.on("data", (d) => { output += d.toString(); });
+      await new Promise<void>((resolve) => child.on("close", () => resolve()));
+      if (output.trim()) {
+        process.stdout.write(output);
+        process.stdout.write("\n");
+      } else {
+        console.log("No changes.");
+      }
+      return true;
+    }
+
+    if (input === "/undo") {
+      const { popUndo } = await import("./undo.js");
+      const fs = await import("node:fs/promises");
+      const entry = popUndo();
+      if (!entry) {
+        console.log("Nothing to undo.");
+        return true;
+      }
+      try {
+        if (entry.previousContent === null) {
+          await fs.unlink(entry.path);
+          console.log(`Undo: deleted ${entry.path} (was newly created)`);
+        } else {
+          await fs.writeFile(entry.path, entry.previousContent, "utf-8");
+          console.log(`Undo: restored ${entry.path}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`Undo failed: ${msg}`);
+      }
+      return true;
     }
 
     return false;

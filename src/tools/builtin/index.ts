@@ -9,6 +9,7 @@ import { globTool } from "./glob.js";
 import { webFetchTool } from "./web_fetch.js";
 import { todoReadTool, todoWriteTool } from "./todo.js";
 import { delegateTool } from "./delegate.js";
+import { gitStatusTool, gitDiffTool, gitLogTool, gitCommitTool } from "./git.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -22,4 +23,8 @@ export const builtinTools: ToolDefinition[] = [
   todoReadTool,
   todoWriteTool,
   delegateTool,
+  gitStatusTool,
+  gitDiffTool,
+  gitLogTool,
+  gitCommitTool,
 ];

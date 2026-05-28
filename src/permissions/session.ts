@@ -10,4 +10,10 @@ export class PermissionSession implements SessionPermissions {
   grant(toolName: string): void {
     this.grants.set(toolName, true);
   }
+
+  grantAll(toolNames: string[]): void {
+    for (const name of toolNames) {
+      this.grants.set(name, true);
+    }
+  }
 }

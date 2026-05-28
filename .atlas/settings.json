@@ -1,0 +1,11 @@
+{
+  "allowedTools": ["bash", "write_file", "edit_file", "git_commit"],
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "SessionStart": [],
+    "SessionEnd": [],
+    "UserPromptSubmit": [],
+    "Stop": []
+  }
+}

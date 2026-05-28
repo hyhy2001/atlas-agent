@@ -1,6 +1,7 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
+import { pushUndo } from "../../undo.js";
 
 export const writeFileTool: ToolDefinition = {
   name: "write_file",
@@ -20,6 +21,9 @@ export const writeFileTool: ToolDefinition = {
 
     try {
       await mkdir(dirname(fullPath), { recursive: true });
+      let previousContent: string | null = null;
+      try { previousContent = await readFile(fullPath, "utf-8"); } catch {}
+      pushUndo({ path: fullPath, previousContent, timestamp: Date.now() });
       await writeFile(fullPath, content, "utf-8");
       return { toolUseId: "", content: `File written: ${fullPath}`, isError: false };
     } catch (err) {

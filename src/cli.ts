@@ -160,9 +160,11 @@ async function main() {
     permissions,
   };
 
-  // Load hooks config (global + project)
-  const { loadHooks } = await import("./hooks.js");
-  const hooks = await loadHooks(process.cwd());
+  // Load settings config (global + project)
+  const { loadSettings } = await import("./hooks.js");
+  const settings = await loadSettings(process.cwd());
+  const hooks = settings.hooks;
+  permissions.grantAll(settings.allowedTools);
 
   // Attach provider/registry/hooks to ctx for delegate tool
   (ctx as any)._provider = provider;

@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
+import { pushUndo } from "../../undo.js";
 
 export const editFileTool: ToolDefinition = {
   name: "edit_file",
@@ -44,6 +45,7 @@ export const editFileTool: ToolDefinition = {
       }
 
       const newContent = content.replace(old_string, new_string);
+      pushUndo({ path: fullPath, previousContent: content, timestamp: Date.now() });
       await writeFile(fullPath, newContent, "utf-8");
       return { toolUseId: "", content: `File edited: ${fullPath}`, isError: false };
     } catch (err) {

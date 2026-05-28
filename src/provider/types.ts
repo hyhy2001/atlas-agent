@@ -34,11 +34,14 @@ export interface ToolResult {
 }
 
 export interface StreamDelta {
-  type: "text" | "tool_call_start" | "tool_call_delta" | "done";
+  type: "text" | "tool_call_start" | "tool_call_delta" | "done" | "usage";
   text?: string;
   toolCallId?: string;
   toolCallName?: string;
   argumentsDelta?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
 }
 
 export type MessageParam = Message;

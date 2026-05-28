@@ -17,8 +17,13 @@ export interface HooksConfig {
   Stop: HookDefinition[];
 }
 
-export async function loadHooks(cwd: string): Promise<HooksConfig> {
-  const result: HooksConfig = {
+export interface SettingsConfig {
+  hooks: HooksConfig;
+  allowedTools: string[];
+}
+
+export async function loadSettings(cwd: string): Promise<SettingsConfig> {
+  const hooks: HooksConfig = {
     PreToolUse: [],
     PostToolUse: [],
     SessionStart: [],
@@ -26,6 +31,7 @@ export async function loadHooks(cwd: string): Promise<HooksConfig> {
     UserPromptSubmit: [],
     Stop: [],
   };
+  const allowedTools: string[] = [];
 
   const globalPath = join(homedir(), ".atlas", "settings.json");
   const localPath = join(cwd, ".atlas", "settings.json");
@@ -36,31 +42,37 @@ export async function loadHooks(cwd: string): Promise<HooksConfig> {
       const parsed = JSON.parse(raw);
       if (parsed.hooks) {
         if (Array.isArray(parsed.hooks.PreToolUse)) {
-          result.PreToolUse.push(...parsed.hooks.PreToolUse);
+          hooks.PreToolUse.push(...parsed.hooks.PreToolUse);
         }
         if (Array.isArray(parsed.hooks.PostToolUse)) {
-          result.PostToolUse.push(...parsed.hooks.PostToolUse);
+          hooks.PostToolUse.push(...parsed.hooks.PostToolUse);
         }
         if (Array.isArray(parsed.hooks.SessionStart)) {
-          result.SessionStart.push(...parsed.hooks.SessionStart);
+          hooks.SessionStart.push(...parsed.hooks.SessionStart);
         }
         if (Array.isArray(parsed.hooks.SessionEnd)) {
-          result.SessionEnd.push(...parsed.hooks.SessionEnd);
+          hooks.SessionEnd.push(...parsed.hooks.SessionEnd);
         }
         if (Array.isArray(parsed.hooks.UserPromptSubmit)) {
-          result.UserPromptSubmit.push(...parsed.hooks.UserPromptSubmit);
+          hooks.UserPromptSubmit.push(...parsed.hooks.UserPromptSubmit);
         }
         if (Array.isArray(parsed.hooks.Stop)) {
-          result.Stop.push(...parsed.hooks.Stop);
+          hooks.Stop.push(...parsed.hooks.Stop);
         }
+      }
+
+      if (Array.isArray(parsed.allowedTools)) {
+        allowedTools.push(...parsed.allowedTools.map((t: unknown) => String(t)));
       }
     } catch {
       // File doesn't exist or is invalid JSON — skip
     }
   }
 
-  return result;
+  return { hooks, allowedTools };
 }
+
+export const loadHooks = loadSettings; // alias for backwards compatibility
 
 export function matchHooks(hooks: HookDefinition[], toolName: string): HookDefinition[] {
   return hooks.filter((h) => h.matcher === "*" || h.matcher === toolName);
