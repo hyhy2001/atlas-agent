@@ -151,6 +151,8 @@ async function main() {
     toolRegistry.registerAll(client.getTools());
   }
 
+  const leaderRegistry = toolRegistry.filterForLeader();
+
   const permissions = new PermissionSession();
   const ctx: ExecutionContext = {
     workingDir: process.cwd(),
@@ -202,7 +204,7 @@ async function main() {
       await runHeadless({
         prompt: args.print,
         provider,
-        toolRegistry,
+        toolRegistry: leaderRegistry,
         executor,
         permissions,
         systemPrompt,
@@ -213,7 +215,7 @@ async function main() {
     } else {
       await startRepl({
         provider,
-        toolRegistry,
+        toolRegistry: leaderRegistry,
         executor,
         systemPrompt,
         initialSession,
@@ -223,6 +225,7 @@ async function main() {
         subagents,
         fastModel: config.fastModel,
         hooks,
+        totalToolCount: toolRegistry.getAll().length,
       });
     }
   } finally {

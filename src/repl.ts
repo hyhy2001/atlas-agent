@@ -38,6 +38,7 @@ export async function startRepl(params: {
   subagents?: SubagentProfile[];
   fastModel?: string;
   hooks?: HooksConfig;
+  totalToolCount?: number;
 }): Promise<void> {
   const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode, hooks } = params;
   const compactionCfg = params.compactionConfig ?? DEFAULT_COMPACTION_CONFIG;
@@ -48,10 +49,11 @@ export async function startRepl(params: {
     console.log("[Plan mode ON — agent can only read, not modify]");
   }
 
-  const toolCount = toolRegistry.getAll().length;
+  const leaderTools = toolRegistry.getAll().length;
+  const totalTools = params.totalToolCount ?? leaderTools;
   const model = provider.getModel();
 
-  console.log(`atlas-agent v0.1.0 | ${toolCount} tools | model: ${model}`);
+  console.log(`atlas-agent v0.1.0 | ${leaderTools} leader / ${totalTools} total tools | model: ${model}`);
   console.log('Type "exit" or "quit" to leave. /help for commands.\n');
 
   const rl = createInterface({

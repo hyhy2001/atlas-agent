@@ -3,6 +3,8 @@
 ## Project Overview
 atlas-agent is an agentic coding CLI built in TypeScript. It uses an OpenAI-compatible API (9router proxy) and pre-wires codebase-memory-mcp for code intelligence.
 
+atlas-agent uses a strict leader/executor architecture: the leader (main model) only orchestrates via delegate; all code reading/editing happens in executor subagents (atlas-mech, atlas-coder, atlas-rescue).
+
 ## Tech Stack
 - TypeScript + Node.js >= 20, ESM (`"type": "module"`)
 - OpenAI SDK (`openai` package) — connects to any OpenAI-compatible proxy

@@ -39,4 +39,20 @@ export class ToolRegistry {
   toAnthropicTools(): ToolDef[] {
     return this.toOpenAITools();
   }
+
+  filterForLeader(): ToolRegistry {
+    const filtered = new ToolRegistry();
+    const leaderTools = new Set([
+      "delegate",
+      "web_fetch",
+      "todo_read",
+      "todo_write",
+    ]);
+    for (const tool of this.getAll()) {
+      if (leaderTools.has(tool.name)) {
+        filtered.register(tool);
+      }
+    }
+    return filtered;
+  }
 }
