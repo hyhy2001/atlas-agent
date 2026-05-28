@@ -71,6 +71,7 @@ install: ensure-node ensure-bun deps build binary symlink
 	@echo "  export ATLAS_BASE_URL=\"http://your-proxy:port/v1\""
 	@echo ""
 	@echo "Run: atlas-agent"
+	@echo "Or run directly: ./$(BINARY_PATH)"
 
 ## ensure-node: Install Node.js locally if not found
 ensure-node:

@@ -1,8 +1,7 @@
 import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
-import { homedir } from "node:os";
+import { join } from "node:path";
 import type { MessageParam } from "./provider/types.js";
+import { paths } from "./paths.js";
 
 export interface Session {
   id: string;
@@ -22,9 +21,7 @@ export interface SessionMeta {
 }
 
 function getSessionsDir(): string {
-  const portable = process.argv[1] ? join(dirname(resolve(process.argv[1])), "sessions") : null;
-  if (portable && existsSync(portable)) return portable;
-  return join(homedir(), ".config", "atlas-agent", "sessions");
+  return paths.sessions();
 }
 
 export function generateSessionId(): string {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { readFileSync, existsSync } from "node:fs";
-import { join, dirname, resolve, isAbsolute } from "node:path";
-import { homedir } from "node:os";
+import { join, isAbsolute } from "node:path";
+import { paths, atlasRoot } from "./paths.js";
 
 const McpServerSchema = z.object({
   name: z.string(),
@@ -25,18 +25,8 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type McpServerConfig = z.infer<typeof McpServerSchema>;
 
-function getPortableDir(): string | null {
-  const exe = process.argv[1];
-  if (!exe) return null;
-  const dir = dirname(resolve(exe));
-  if (existsSync(join(dir, "config", "settings.json")) || existsSync(join(dir, "bin"))) {
-    return dir;
-  }
-  return null;
-}
-
 export function getPortableRoot(): string | null {
-  return getPortableDir();
+  return atlasRoot();
 }
 
 function loadJsonFile(path: string): Record<string, unknown> {
@@ -53,7 +43,7 @@ function resolveMcpCommands(
   servers: Array<{ name: string; command: string; args: string[]; autoApprove: boolean }>,
   portableDir: string
 ): Array<{ name: string; command: string; args: string[]; autoApprove: boolean }> {
-  const binDir = join(portableDir, "bin");
+  const binDir = paths.bin();
   return servers.map((s) => {
     if (!isAbsolute(s.command)) {
       const candidate = join(binDir, s.command);
@@ -72,11 +62,11 @@ function resolveMcpCommands(
 }
 
 export function loadConfig(overrides?: Partial<Config>): Config {
-  const globalPath = join(homedir(), ".config", "atlas-agent", "settings.json");
+  const globalPath = paths.config();
   const localPath = join(process.cwd(), ".atlas-agent.json");
 
-  const portableDir = getPortableDir();
-  const portablePath = portableDir ? join(portableDir, "config", "settings.json") : null;
+  const portableDir = getPortableRoot();
+  const portablePath = portableDir ? paths.config() : null;
 
   const globalConfig = loadJsonFile(globalPath);
   const portableConfig = portablePath ? loadJsonFile(portablePath) : {};
@@ -107,7 +97,6 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   const config = ConfigSchema.parse(merged);
 
-  // Resolve relative MCP commands against portable bin/ dir
   if (portableDir) {
     const resolved = resolveMcpCommands(config.mcpServers, portableDir);
     return { ...config, mcpServers: resolved };

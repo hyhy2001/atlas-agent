@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { paths } from "./paths.js";
 
 export interface HookDefinition {
   matcher: string;
@@ -33,7 +33,7 @@ export async function loadSettings(cwd: string): Promise<SettingsConfig> {
   };
   const allowedTools: string[] = [];
 
-  const globalPath = join(homedir(), ".atlas", "settings.json");
+  const globalPath = paths.hooks();
   const localPath = join(cwd, ".atlas", "settings.json");
 
   for (const filePath of [globalPath, localPath]) {

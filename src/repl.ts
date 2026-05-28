@@ -218,9 +218,9 @@ export async function startRepl(params: {
     if (input === "/save") {
       const session = buildSession();
       await saveSession(session);
-      const os = await import("node:os");
       const path = await import("node:path");
-      const filePath = path.join(os.homedir(), ".config", "atlas-agent", "sessions", `${currentSessionId}.json`);
+      const { paths } = await import("./paths.js");
+      const filePath = path.join(paths.sessions(), `${currentSessionId}.json`);
       console.log(`Session saved: ${filePath}`);
       return true;
     }

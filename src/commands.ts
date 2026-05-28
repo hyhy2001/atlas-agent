@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { paths } from "./paths.js";
 
 export interface CustomCommand {
   name: string;
@@ -12,8 +12,7 @@ export interface CustomCommand {
 export async function loadCommands(cwd: string): Promise<CustomCommand[]> {
   const results: Map<string, CustomCommand> = new Map();
 
-  const home = os.homedir();
-  const globalDir = path.join(home, ".atlas", "commands");
+  const globalDir = paths.commands();
   const localDir = path.join(cwd, ".atlas", "commands");
 
   async function readDirIfExists(dir: string) {

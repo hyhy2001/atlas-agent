@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { paths } from "./paths.js";
 
 export interface MemoryEntry {
   type: "user" | "project" | "feedback" | "reference";
@@ -12,7 +12,7 @@ export interface MemoryEntry {
 function getMemoryDir(cwd: string): string {
   const local = resolve(cwd, ".atlas", "memory");
   if (existsSync(local)) return local;
-  return join(homedir(), ".atlas", "memory");
+  return paths.memory();
 }
 
 export async function loadAllMemory(cwd: string): Promise<MemoryEntry[]> {

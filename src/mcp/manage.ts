@@ -1,8 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { homedir } from "node:os";
-import { getPortableRoot } from "../config.js";
+import { dirname } from "node:path";
+import { paths } from "../paths.js";
 
 export interface McpServerEntry {
   name: string;
@@ -12,9 +11,7 @@ export interface McpServerEntry {
 }
 
 function getSettingsPath(): string {
-  const portable = getPortableRoot();
-  if (portable) return join(portable, "config", "settings.json");
-  return join(homedir(), ".config", "atlas-agent", "settings.json");
+  return paths.config();
 }
 
 async function loadSettings(): Promise<{ mcpServers: McpServerEntry[]; [key: string]: unknown }> {

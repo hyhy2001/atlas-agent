@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { homedir } from "node:os";
+import { join } from "node:path";
+import { paths } from "./paths.js";
 
 export interface TelemetryEvent {
   sessionId: string;
@@ -25,14 +25,7 @@ export interface SessionStats {
 }
 
 function getTelemetryDir(): string {
-  const exe = process.argv[1];
-  if (exe) {
-    const binaryDir = dirname(resolve(exe));
-    const portableTelemetry = join(binaryDir, "telemetry");
-    const portableConfig = join(binaryDir, "config", "settings.json");
-    if (existsSync(portableConfig)) return portableTelemetry;
-  }
-  return join(homedir(), ".config", "atlas-agent", "telemetry");
+  return paths.telemetry();
 }
 
 export async function recordEvent(event: TelemetryEvent): Promise<void> {

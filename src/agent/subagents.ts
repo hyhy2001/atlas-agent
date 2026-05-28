@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { paths } from "../paths.js";
 import { ToolRegistry } from "../tools/registry.js";
 
 export interface SubagentProfile {
@@ -82,8 +82,7 @@ export function filterRegistryForSubagent(
 export async function loadCustomSubagents(cwd: string): Promise<SubagentProfile[]> {
   const results: Map<string, SubagentProfile> = new Map();
 
-  const home = os.homedir();
-  const globalDir = path.join(home, ".atlas", "agents");
+  const globalDir = paths.agents();
   const localDir = path.join(cwd, ".atlas", "agents");
 
   async function readDirIfExists(dir: string) {
