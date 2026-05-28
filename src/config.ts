@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, resolve, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 
 const McpServerSchema = z.object({
@@ -24,6 +24,20 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 export type McpServerConfig = z.infer<typeof McpServerSchema>;
 
+function getPortableDir(): string | null {
+  const exe = process.argv[1];
+  if (!exe) return null;
+  const dir = dirname(resolve(exe));
+  if (existsSync(join(dir, "config", "config.json")) || existsSync(join(dir, "bin"))) {
+    return dir;
+  }
+  return null;
+}
+
+export function getPortableRoot(): string | null {
+  return getPortableDir();
+}
+
 function loadJsonFile(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   try {
@@ -34,14 +48,35 @@ function loadJsonFile(path: string): Record<string, unknown> {
   }
 }
 
+function resolveMcpCommands(
+  servers: Array<{ name: string; command: string; args: string[]; autoApprove: boolean }>,
+  portableDir: string
+): Array<{ name: string; command: string; args: string[]; autoApprove: boolean }> {
+  const binDir = join(portableDir, "bin");
+  return servers.map((s) => {
+    if (!isAbsolute(s.command)) {
+      const candidate = join(binDir, s.command);
+      if (existsSync(candidate)) {
+        return { ...s, command: candidate };
+      }
+    }
+    return s;
+  });
+}
+
 export function loadConfig(overrides?: Partial<Config>): Config {
   const globalPath = join(homedir(), ".config", "atlas-agent", "config.json");
   const localPath = join(process.cwd(), ".atlas-agent.json");
 
+  const portableDir = getPortableDir();
+  const portablePath = portableDir ? join(portableDir, "config", "config.json") : null;
+
   const globalConfig = loadJsonFile(globalPath);
+  const portableConfig = portablePath ? loadJsonFile(portablePath) : {};
   const localConfig = loadJsonFile(localPath);
 
-  const merged = { ...globalConfig, ...localConfig };
+  // Layered merge: global < portable < local
+  const merged = { ...globalConfig, ...portableConfig, ...localConfig };
 
   if (process.env["ATLAS_BASE_URL"]) {
     merged.baseURL = process.env["ATLAS_BASE_URL"];
@@ -57,7 +92,6 @@ export function loadConfig(overrides?: Partial<Config>): Config {
     merged.subagentModel = process.env["ATLAS_SUBAGENT_MODEL"];
   }
 
-  // Allow overriding system prompt via environment variable
   if (process.env["ATLAS_SYSTEM_PROMPT"]) {
     merged.systemPrompt = process.env["ATLAS_SYSTEM_PROMPT"];
   }
@@ -66,5 +100,13 @@ export function loadConfig(overrides?: Partial<Config>): Config {
     Object.assign(merged, overrides);
   }
 
-  return ConfigSchema.parse(merged);
+  const config = ConfigSchema.parse(merged);
+
+  // Resolve relative MCP commands against portable bin/ dir
+  if (portableDir) {
+    const resolved = resolveMcpCommands(config.mcpServers, portableDir);
+    return { ...config, mcpServers: resolved };
+  }
+
+  return config;
 }

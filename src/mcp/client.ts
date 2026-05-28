@@ -1,8 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { join } from "node:path";
 import which from "which";
 import type { McpServerConfig } from "./types.js";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../tools/types.js";
+import { getPortableRoot } from "../config.js";
 
 export class McpClient {
   private client: Client;
@@ -34,10 +36,17 @@ export class McpClient {
         return null;
       }
 
+      const portableRoot = getPortableRoot();
+      const env =
+        portableRoot && config.name === "codebase-memory"
+          ? { ...process.env, CBM_CACHE_DIR: join(portableRoot, "cache") } as Record<string, string>
+          : undefined;
+
       const transport = new StdioClientTransport({
         command: config.command,
         args: config.args,
         stderr: "pipe",
+        env,
       });
 
       const client = new Client({

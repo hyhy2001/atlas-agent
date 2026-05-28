@@ -39,25 +39,76 @@ echo "[3/3] Build info:"
 ls -lh "$OUT_DIR/atlas-agent-linux-x64"
 echo ""
 
-# Create a tarball for distribution
-echo "Creating release tarball..."
-cd "$OUT_DIR"
-tar -czf "atlas-agent-v${VERSION}-linux-x64.tar.gz" atlas-agent-linux-x64
+# Create portable distribution directory
+echo "Creating portable distribution..."
+DIST_DIR="$OUT_DIR/dist"
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR/bin" "$DIST_DIR/config" "$DIST_DIR/cache" "$DIST_DIR/sessions"
+
+cp "$OUT_DIR/atlas-agent-linux-x64" "$DIST_DIR/atlas-agent"
+chmod +x "$DIST_DIR/atlas-agent"
+cp "$PROJECT_DIR/scripts/setup.sh" "$DIST_DIR/setup.sh"
+chmod +x "$DIST_DIR/setup.sh"
+
+cat > "$DIST_DIR/config/config.json" <<'JSON'
+{
+  "model": "all",
+  "mcpServers": [
+    {
+      "name": "codebase-memory",
+      "command": "./bin/codebase-memory-mcp",
+      "args": [],
+      "autoApprove": true
+    }
+  ]
+}
+JSON
+
+cat > "$DIST_DIR/README.txt" <<'README'
+atlas-agent — AI Coding Assistant (Portable)
+=============================================
+
+Quick Start:
+  1. Run setup (one-time, downloads code intelligence binary):
+     ./setup.sh
+
+  2. Set credentials (add to ~/.bashrc or set before running):
+     export ATLAS_AUTH_TOKEN="your-token"
+     export ATLAS_BASE_URL="http://your-proxy:port/v1"
+
+  3. Run:
+     ./atlas-agent
+
+Everything is contained in this directory — no root, no home dir writes.
+  atlas-agent       Main binary
+  bin/              Code intelligence binary (after setup.sh)
+  config/           Config file
+  cache/            Code knowledge graph database
+  sessions/         Saved conversations
+
+Environment variables:
+  ATLAS_BASE_URL          Required. Your LLM proxy endpoint.
+  ATLAS_AUTH_TOKEN        Required. Your API token.
+  ATLAS_MODEL             Optional. Model name (default: "all").
+  ATLAS_SUBAGENT_MODEL    Optional. Cheaper model for subagents.
+
+In-agent commands: type /help inside the REPL.
+README
+
+# Pack contents directly (no subdirectory wrapper)
+tar -czf "$OUT_DIR/atlas-agent-v${VERSION}-linux-x64.tar.gz" -C "$DIST_DIR" .
+rm -rf "$DIST_DIR"
 echo "  Created: $OUT_DIR/atlas-agent-v${VERSION}-linux-x64.tar.gz"
 echo ""
 
 echo "=== Build complete ==="
 echo ""
 echo "To distribute:"
-echo "  1. Copy atlas-agent-v${VERSION}-linux-x64.tar.gz to your internal file server"
-echo "  2. Team members download and extract:"
+echo "  1. Copy atlas-agent-v${VERSION}-linux-x64.tar.gz to your file server"
+echo "  2. Team members:"
+echo "     mkdir atlas-agent && cd atlas-agent"
 echo "     tar -xzf atlas-agent-v${VERSION}-linux-x64.tar.gz"
-echo "     chmod +x atlas-agent-linux-x64"
-echo "     sudo mv atlas-agent-linux-x64 /usr/local/bin/atlas-agent"
-echo ""
-echo "  3. Set environment variables:"
+echo "     ./setup.sh"
 echo "     export ATLAS_AUTH_TOKEN=\"your-token\""
-echo "     export ATLAS_BASE_URL=\"https://your-proxy\""
-echo ""
-echo "  4. Run:"
-echo "     atlas-agent"
+echo "     export ATLAS_BASE_URL=\"http://your-proxy:port/v1\""
+echo "     ./atlas-agent"
