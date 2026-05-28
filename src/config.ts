@@ -13,6 +13,9 @@ const McpServerSchema = z.object({
 const ConfigSchema = z.object({
   model: z.string().default("all"),
   subagentModel: z.string().optional(),
+  mechModel: z.string().optional(),
+  coderModel: z.string().optional(),
+  rescueModel: z.string().optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
   systemPrompt: z.string().optional(),
@@ -91,6 +94,9 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   if (process.env["ATLAS_SUBAGENT_MODEL"]) {
     merged.subagentModel = process.env["ATLAS_SUBAGENT_MODEL"];
   }
+  if (process.env["ATLAS_MECH_MODEL"]) merged.mechModel = process.env["ATLAS_MECH_MODEL"];
+  if (process.env["ATLAS_CODER_MODEL"]) merged.coderModel = process.env["ATLAS_CODER_MODEL"];
+  if (process.env["ATLAS_RESCUE_MODEL"]) merged.rescueModel = process.env["ATLAS_RESCUE_MODEL"];
 
   if (process.env["ATLAS_SYSTEM_PROMPT"]) {
     merged.systemPrompt = process.env["ATLAS_SYSTEM_PROMPT"];

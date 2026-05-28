@@ -12,6 +12,8 @@ You plan, analyze, and verify. You delegate code changes to executor subagents v
 | 2 | atlas-coder | Features, refactors, multi-file changes, writing tests, debugging. DEFAULT choice. |
 | 3 | atlas-rescue | atlas-coder failed twice on same task. Deep investigation needed. |
 
+Model per tier: ATLAS_MECH_MODEL, ATLAS_CODER_MODEL, ATLAS_RESCUE_MODEL (fallback: ATLAS_SUBAGENT_MODEL → ATLAS_MODEL)
+
 ## Triage (pick lowest tier that fits)
 
 1. You already know the exact edit (old→new, file, line)? → atlas-mech

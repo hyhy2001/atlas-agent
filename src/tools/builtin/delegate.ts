@@ -88,20 +88,22 @@ export const delegateTool: ToolDefinition = {
     let systemPrompt: string;
     let subProvider: OpenAIProvider;
 
-    const subagentModel = process.env["ATLAS_SUBAGENT_MODEL"];
+    const mechModel = (ctx as any)._mechModel || process.env["ATLAS_MECH_MODEL"] || process.env["ATLAS_SUBAGENT_MODEL"];
+    const coderModel = (ctx as any)._coderModel || process.env["ATLAS_CODER_MODEL"] || process.env["ATLAS_SUBAGENT_MODEL"];
+    const rescueModel = (ctx as any)._rescueModel || process.env["ATLAS_RESCUE_MODEL"];
 
     switch (agent) {
       case "atlas-mech":
         systemPrompt = ATLAS_MECH_PROMPT;
-        subProvider = subagentModel ? provider.withModel(subagentModel) : provider;
+        subProvider = mechModel ? provider.withModel(mechModel) : provider;
         break;
       case "atlas-coder":
         systemPrompt = ATLAS_CODER_PROMPT;
-        subProvider = subagentModel ? provider.withModel(subagentModel) : provider;
+        subProvider = coderModel ? provider.withModel(coderModel) : provider;
         break;
       case "atlas-rescue":
         systemPrompt = ATLAS_RESCUE_PROMPT;
-        subProvider = provider;
+        subProvider = rescueModel ? provider.withModel(rescueModel) : provider;
         break;
     }
 

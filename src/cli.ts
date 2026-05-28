@@ -166,6 +166,9 @@ async function main() {
   (ctx as any)._provider = provider;
   (ctx as any)._registry = toolRegistry;
   (ctx as any)._hooks = hooks;
+  (ctx as any)._mechModel = config.mechModel;
+  (ctx as any)._coderModel = config.coderModel;
+  (ctx as any)._rescueModel = config.rescueModel;
 
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
 
