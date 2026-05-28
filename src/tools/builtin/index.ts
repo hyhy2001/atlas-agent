@@ -9,6 +9,7 @@ import { globTool } from "./glob.js";
 import { webFetchTool } from "./web_fetch.js";
 import { todoReadTool, todoWriteTool } from "./todo.js";
 import { delegateTool } from "./delegate.js";
+import { memorySaveTool, memoryAppendTool, memoryReadTool, memoryDeleteTool } from "./memory.js";
 import { gitStatusTool, gitDiffTool, gitLogTool, gitCommitTool } from "./git.js";
 
 export const builtinTools: ToolDefinition[] = [
@@ -23,6 +24,10 @@ export const builtinTools: ToolDefinition[] = [
   todoReadTool,
   todoWriteTool,
   delegateTool,
+  memorySaveTool,
+  memoryAppendTool,
+  memoryReadTool,
+  memoryDeleteTool,
   gitStatusTool,
   gitDiffTool,
   gitLogTool,

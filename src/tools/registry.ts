@@ -47,6 +47,9 @@ export class ToolRegistry {
       "web_fetch",
       "todo_read",
       "todo_write",
+      "memory_save",
+      "memory_append",
+      "memory_read",
     ]);
     for (const tool of this.getAll()) {
       if (leaderTools.has(tool.name)) {

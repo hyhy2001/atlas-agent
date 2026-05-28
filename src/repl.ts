@@ -25,6 +25,7 @@ import { isMultilineStart, isMultilineEnd, shouldContinue, stripContinuation } f
 import { filterRegistryForSubagent, getSubagent, listSubagents, type SubagentProfile } from "./agent/subagents.js";
 import { runLifecycleHooks, type HooksConfig } from "./hooks.js";
 import { createCompleter } from "./completion.js";
+import { recordEvent } from "./telemetry.js";
 
 export async function startRepl(params: {
   provider: OpenAIProvider;
@@ -43,6 +44,7 @@ export async function startRepl(params: {
 }): Promise<void> {
   const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode, hooks } = params;
   const compactionCfg = params.compactionConfig ?? DEFAULT_COMPACTION_CONFIG;
+  const replStartCwd = process.cwd();
 
   const planMode = new PlanMode();
   if (startInPlanMode) {
@@ -59,8 +61,8 @@ export async function startRepl(params: {
 
   const allCommandNames = [
     "save", "sessions", "load", "clear", "help", "context",
-    "plan", "execute", "compact", "cost", "init", "diff", "undo",
-    "agent", "agents", "model", "doctor",
+    "plan", "execute", "compact", "cost", "stats", "init", "diff", "undo",
+    "agent", "agents", "model", "doctor", "worktree",
     ...(commands ?? []).map(c => c.name),
   ];
 
@@ -182,6 +184,14 @@ export async function startRepl(params: {
   let sessionOutputTokens = 0;
 
   await runLifecycleHooks(hooks?.SessionStart ?? [], { ATLAS_SESSION_ID: currentSessionId, ATLAS_CWD: process.cwd(), ATLAS_MODEL: model });
+  try {
+    await recordEvent({
+      sessionId: currentSessionId,
+      timestamp: new Date().toISOString(),
+      type: "session_start",
+      data: { model, cwd: process.cwd() },
+    });
+  } catch {}
 
   let isAgentRunning = false;
   let ctrlCPressedAt: number | null = null;
@@ -294,6 +304,35 @@ export async function startRepl(params: {
       return true;
     }
 
+    if (input === "/stats" || input.startsWith("/stats ")) {
+      const arg = input.slice(6).trim();
+      const { getSessionStats, listAllSessionStats, formatStats } = await import("./telemetry.js");
+
+      if (arg === "all") {
+        const all = await listAllSessionStats();
+        if (all.length === 0) {
+          console.log("No telemetry data.");
+          return true;
+        }
+        const totalCost = all.reduce((s, x) => s + x.estimatedCost, 0);
+        const totalTokens = all.reduce((s, x) => s + x.inputTokens + x.outputTokens, 0);
+        console.log(`Total: ${all.length} sessions, ~${(totalTokens/1000).toFixed(1)}k tokens, ~$${totalCost.toFixed(3)}\n`);
+        for (const s of all.slice(0, 10)) {
+          console.log(formatStats(s));
+          console.log("");
+        }
+        if (all.length > 10) console.log(`(${all.length - 10} more sessions)`);
+      } else {
+        const stats = await getSessionStats(arg || currentSessionId);
+        if (!stats) {
+          console.log(`No stats for session ${arg || "current"}.`);
+          return true;
+        }
+        console.log(formatStats(stats));
+      }
+      return true;
+    }
+
     if (input === "/init" || input === "/init --force") {
       const force = input.includes("--force");
       const atlasPath = path.join(process.cwd(), "ATLAS.md");
@@ -336,10 +375,12 @@ Keep it under 150 lines, concise and useful as AI context.`;
       console.log("  /execute    — Exit plan mode (allow modifications)");
       console.log("  /compact    — Compact conversation history");
       console.log("  /cost       — Show token usage and estimated cost");
+      console.log("  /stats [all|<session-id>] — Show session telemetry");
       console.log("  /init       — Generate ATLAS.md for this project");
       console.log("  /context    — Show loaded project context path");
       console.log("  /diff [path] — Show git diff (optionally for specific file)");
       console.log("  /undo       — Revert last file change made by agent");
+      console.log("  /worktree   — Manage git worktrees (list/create/enter/exit/remove)");
       console.log("  /agent <name>  — Invoke a subagent for one turn");
       console.log("  /agents        — List available subagents");
       console.log("  /help       — Show this help");
@@ -542,6 +583,94 @@ Keep it under 150 lines, concise and useful as AI context.`;
       return true;
     }
 
+    if (input === "/worktree" || input.startsWith("/worktree ")) {
+      const { listWorktrees, createWorktree, removeWorktree, hasUncommittedChanges } = await import("./worktree.js");
+      const parts = input.split(/\s+/);
+      const subcmd = parts[1] ?? "list";
+
+      if (subcmd === "list") {
+        const wts = await listWorktrees(replStartCwd);
+        if (wts.length === 0) {
+          console.log("No worktrees.");
+        } else {
+          for (const wt of wts) {
+            console.log(`  ${wt.branch}  ${wt.path}`);
+          }
+        }
+        return true;
+      }
+
+      if (subcmd === "create") {
+        const name = parts[2];
+        if (!name) {
+          console.log("Usage: /worktree create <name>");
+          return true;
+        }
+        const result = await createWorktree(replStartCwd, name);
+        if (result.error) {
+          console.log(`Error: ${result.error}`);
+        } else {
+          console.log(`Created worktree: ${result.path}`);
+          console.log(`Branch: atlas/${name}`);
+          console.log(`Use /worktree enter ${name} to switch into it`);
+        }
+        return true;
+      }
+
+      if (subcmd === "enter") {
+        const name = parts[2];
+        if (!name) {
+          console.log("Usage: /worktree enter <name>");
+          return true;
+        }
+        const fs = await import("node:fs");
+        const wtPath = path.join(replStartCwd, ".atlas", "worktrees", name);
+        if (!fs.existsSync(wtPath)) {
+          console.log(`Worktree not found: ${name}`);
+          return true;
+        }
+        process.chdir(wtPath);
+        console.log(`Switched to worktree: ${wtPath}`);
+        return true;
+      }
+
+      if (subcmd === "exit") {
+        if (process.cwd() === replStartCwd) {
+          console.log("Not currently in a worktree.");
+        } else {
+          process.chdir(replStartCwd);
+          console.log(`Returned to: ${replStartCwd}`);
+        }
+        return true;
+      }
+
+      if (subcmd === "remove" || subcmd === "rm") {
+        const name = parts[2];
+        if (!name) {
+          console.log("Usage: /worktree remove <name>");
+          return true;
+        }
+        const wtPath = path.join(replStartCwd, ".atlas", "worktrees", name);
+
+        if (await hasUncommittedChanges(wtPath)) {
+          console.log("Worktree has uncommitted changes. Add --force to remove anyway.");
+          const force = parts[3] === "--force";
+          if (!force) return true;
+          const result = await removeWorktree(replStartCwd, name, true);
+          if (result.error) console.log(`Error: ${result.error}`);
+          else console.log(`Removed worktree: ${name}`);
+        } else {
+          const result = await removeWorktree(replStartCwd, name);
+          if (result.error) console.log(`Error: ${result.error}`);
+          else console.log(`Removed worktree: ${name}`);
+        }
+        return true;
+      }
+
+      console.log("Usage: /worktree [list|create <name>|enter <name>|exit|remove <name>]");
+      return true;
+    }
+
     return false;
   }
 
@@ -585,6 +714,18 @@ Keep it under 150 lines, concise and useful as AI context.`;
       sessionInputTokens += result.inputTokens;
       sessionOutputTokens += result.outputTokens;
       console.log(chalk.gray(`\n[tokens: ${formatTokenCount(result.inputTokens)} in / ${formatTokenCount(result.outputTokens)} out | session: ${formatTokenCount(sessionInputTokens)} in / ${formatTokenCount(sessionOutputTokens)} out]`));
+      try {
+        await recordEvent({
+          sessionId: currentSessionId,
+          timestamp: new Date().toISOString(),
+          type: "turn_complete",
+          data: {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            cachedTokens: (result as any).cachedTokens ?? 0,
+          },
+        });
+      } catch {}
       await runLifecycleHooks(hooks?.Stop ?? [], { ATLAS_SESSION_ID: currentSessionId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -609,5 +750,13 @@ Keep it under 150 lines, concise and useful as AI context.`;
   }
 
   await runLifecycleHooks(hooks?.SessionEnd ?? [], { ATLAS_SESSION_ID: currentSessionId, ATLAS_CWD: process.cwd() });
+  try {
+    await recordEvent({
+      sessionId: currentSessionId,
+      timestamp: new Date().toISOString(),
+      type: "session_end",
+      data: { messageCount: messages.length },
+    });
+  } catch {}
   rl.close();
 }

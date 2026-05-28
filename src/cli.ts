@@ -73,6 +73,37 @@ function parseArgs(argv: string[]): {
 }
 
 async function main() {
+  const argv = process.argv.slice(2);
+
+  // Subcommand: mcp
+  if (argv[0] === "mcp") {
+    const { listMcpServers, addMcpServer, removeMcpServer } = await import("./mcp/manage.js");
+    const subcmd = argv[1];
+    if (subcmd === "list") {
+      await listMcpServers();
+    } else if (subcmd === "add") {
+      const name = argv[2];
+      const command = argv[3];
+      const args = argv.slice(4);
+      if (!name || !command) {
+        console.error("Usage: atlas-agent mcp add <name> <command> [args...]");
+        process.exit(1);
+      }
+      await addMcpServer(name, command, args);
+    } else if (subcmd === "remove" || subcmd === "rm") {
+      const name = argv[2];
+      if (!name) {
+        console.error("Usage: atlas-agent mcp remove <name>");
+        process.exit(1);
+      }
+      await removeMcpServer(name);
+    } else {
+      console.error("Usage: atlas-agent mcp <list|add|remove> [args...]");
+      process.exit(1);
+    }
+    return;
+  }
+
   const args = parseArgs(process.argv);
 
   const config = loadConfig(args.model ? { model: args.model } : undefined);
@@ -95,6 +126,13 @@ async function main() {
   if (projectContext && projectContextPath) {
     systemPrompt += `\n\n# Project Instructions\n\n${projectContext}`;
     console.log(`Loaded project context from ${projectContextPath}`);
+  }
+
+  const { loadAllMemory, formatMemoryForPrompt } = await import("./memory.js");
+  const memory = await loadAllMemory(process.cwd());
+  if (memory.length > 0) {
+    systemPrompt += formatMemoryForPrompt(memory);
+    console.log(`Loaded ${memory.length} memory entries`);
   }
 
   const apiKey = config.authToken || process.env["ATLAS_API_KEY"] || "";
