@@ -4,13 +4,19 @@ import type { ProviderConfig, MessageParam, Tool } from "./types.js";
 export class AnthropicProvider {
   private client: Anthropic;
   private model: string;
+  private config: ProviderConfig;
 
   constructor(config: ProviderConfig) {
+    this.config = config;
     this.client = new Anthropic({
       apiKey: config.apiKey,
       baseURL: config.baseURL,
     });
     this.model = config.model;
+  }
+
+  withModel(model: string): AnthropicProvider {
+    return new AnthropicProvider({ ...this.config, model });
   }
 
   stream(messages: MessageParam[], tools: Tool[], systemPrompt?: string) {

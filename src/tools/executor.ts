@@ -12,7 +12,7 @@ export class ToolExecutor {
   constructor(registry: ToolRegistry, ctx: ExecutionContext, hooks?: HooksConfig) {
     this.registry = registry;
     this.ctx = ctx;
-    this.hooks = hooks ?? { PreToolUse: [], PostToolUse: [] };
+    this.hooks = hooks ?? { PreToolUse: [], PostToolUse: [], SessionStart: [], SessionEnd: [], UserPromptSubmit: [], Stop: [] };
   }
 
   async execute(

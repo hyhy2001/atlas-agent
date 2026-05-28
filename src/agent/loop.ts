@@ -3,6 +3,11 @@ import type { AnthropicProvider } from "../provider/anthropic.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 
+export interface LoopResult {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export async function runAgentLoop(params: {
   provider: AnthropicProvider;
   messages: MessageParam[];
@@ -10,9 +15,12 @@ export async function runAgentLoop(params: {
   executor: ToolExecutor;
   systemPrompt?: string;
   abortSignal: AbortSignal;
-}): Promise<void> {
+}): Promise<LoopResult> {
   const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal } = params;
   const tools = toolRegistry.toAnthropicTools();
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   while (!abortSignal.aborted) {
     const stream = provider.stream(messages, tools, systemPrompt);
@@ -49,10 +57,14 @@ export async function runAgentLoop(params: {
     }
 
     const finalMessage = await stream.finalMessage();
+    if (finalMessage.usage) {
+      totalInputTokens += finalMessage.usage.input_tokens ?? 0;
+      totalOutputTokens += finalMessage.usage.output_tokens ?? 0;
+    }
     messages.push({ role: "assistant", content: finalMessage.content });
 
     if (toolUseBlocks.length === 0) {
-      return;
+      return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
     }
 
     const results = await executor.execute(toolUseBlocks);
@@ -67,4 +79,6 @@ export async function runAgentLoop(params: {
       })),
     });
   }
+
+  return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
 }

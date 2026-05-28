@@ -12,6 +12,7 @@ const McpServerSchema = z.object({
 
 const ConfigSchema = z.object({
   model: z.string().default("claude-sonnet-4-20250514"),
+  subagentModel: z.string().optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
   systemPrompt: z.string().optional(),
@@ -50,6 +51,10 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   }
   if (process.env["ATLAS_MODEL"]) {
     merged.model = process.env["ATLAS_MODEL"];
+  }
+
+  if (process.env["ATLAS_SUBAGENT_MODEL"]) {
+    merged.subagentModel = process.env["ATLAS_SUBAGENT_MODEL"];
   }
 
   // Allow overriding system prompt via environment variable

@@ -1,4 +1,6 @@
 import { createInterface } from "node:readline";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { AnthropicProvider } from "./provider/anthropic.js";
 import type { ToolRegistry } from "./tools/registry.js";
 import type { ToolExecutor } from "./tools/executor.js";
@@ -21,6 +23,7 @@ import { PlanMode } from "./agent/plan_mode.js";
 import chalk from "chalk";
 import { isMultilineStart, isMultilineEnd, shouldContinue, stripContinuation } from "./multiline.js";
 import { filterRegistryForSubagent, getSubagent, listSubagents, type SubagentProfile } from "./agent/subagents.js";
+import { runLifecycleHooks, type HooksConfig } from "./hooks.js";
 
 export async function startRepl(params: {
   provider: AnthropicProvider;
@@ -33,8 +36,10 @@ export async function startRepl(params: {
   compactionConfig?: CompactionConfig;
   startInPlanMode?: boolean;
   subagents?: SubagentProfile[];
+  subagentModel?: string;
+  hooks?: HooksConfig;
 }): Promise<void> {
-  const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode } = params;
+  const { provider, toolRegistry, executor, systemPrompt, initialSession, projectContextPath, commands, startInPlanMode, hooks } = params;
   const compactionCfg = params.compactionConfig ?? DEFAULT_COMPACTION_CONFIG;
 
   const planMode = new PlanMode();
@@ -126,6 +131,57 @@ export async function startRepl(params: {
     return "(no user message)";
   }
 
+  async function processAtMentions(input: string, cwd: string): Promise<string> {
+    const atPattern = /@([\w./\-]+\.\w+)/g;
+    let result = input;
+    const matches = [...input.matchAll(atPattern)];
+
+    for (const match of matches) {
+      const filePath = path.resolve(cwd, match[1]);
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        const lines = content.split("\n");
+        const preview = lines.length > 200 ? lines.slice(0, 200).join("\n") + "\n... (truncated)" : content;
+        result = result.replace(match[0], `\n\n<file path="${match[1]}">\n${preview}\n</file>\n`);
+      } catch {
+        // leave as-is
+      }
+    }
+
+    return result;
+  }
+
+  function formatTokenCount(n: number): string {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  let sessionInputTokens = 0;
+  let sessionOutputTokens = 0;
+
+  await runLifecycleHooks(hooks?.SessionStart ?? [], { ATLAS_SESSION_ID: currentSessionId, ATLAS_CWD: process.cwd(), ATLAS_MODEL: model });
+
+  let isAgentRunning = false;
+  let ctrlCPressedAt: number | null = null;
+  const controllerRef: { current: AbortController | null } = { current: null };
+
+  process.on("SIGINT", () => {
+    if (isAgentRunning) {
+      controllerRef.current?.abort();
+      process.stdout.write("\n[Interrupted]\n");
+      return;
+    }
+    const now = Date.now();
+    if (ctrlCPressedAt && now - ctrlCPressedAt < 3000) {
+      process.stdout.write("\n");
+      rl.close();
+      process.exit(0);
+    }
+    ctrlCPressedAt = now;
+    process.stdout.write("\n(Press Ctrl+C again to exit)\n");
+    rl.prompt?.();
+  });
+
   async function handleCommand(input: string): Promise<boolean> {
     if (input === "/save") {
       const session = buildSession();
@@ -204,6 +260,50 @@ export async function startRepl(params: {
       return true;
     }
 
+    if (input === "/cost") {
+      const inCost = (sessionInputTokens / 1_000_000) * 1.5;
+      const outCost = (sessionOutputTokens / 1_000_000) * 15.0;
+      const total = inCost + outCost;
+      const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+      console.log(`Token usage this session:`);
+      console.log(`  Input:  ${fmt(sessionInputTokens)} tokens  (~$${inCost.toFixed(3)})`);
+      console.log(`  Output: ${fmt(sessionOutputTokens)} tokens  (~$${outCost.toFixed(3)})`);
+      console.log(`  Total:  ${fmt(sessionInputTokens + sessionOutputTokens)} tokens  (~$${total.toFixed(3)})`);
+      return true;
+    }
+
+    if (input === "/init" || input === "/init --force") {
+      const force = input.includes("--force");
+      const atlasPath = path.join(process.cwd(), "ATLAS.md");
+      if (!force) {
+        try {
+          const { access } = await import("node:fs/promises");
+          await access(atlasPath);
+          console.log("ATLAS.md already exists. Use /init --force to overwrite.");
+          return true;
+        } catch {}
+      }
+      console.log("Generating ATLAS.md...");
+      const initPrompt = `Scan this project and generate an ATLAS.md file. Include:
+1. Project overview (what it does, tech stack)
+2. Directory structure (key directories)
+3. Key files and their roles
+4. How to build and run
+5. Common development tasks
+
+Use list_directory and read_file to explore, then write_file to create ATLAS.md.
+Keep it under 150 lines, concise and useful as AI context.`;
+      messages.push({ role: "user", content: initPrompt });
+      const controller = new AbortController();
+      try {
+        await runAgentLoop({ provider, messages, toolRegistry, executor, systemPrompt, abortSignal: controller.signal });
+      } catch (err) {
+        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      process.stdout.write("\n");
+      return true;
+    }
+
     if (input === "/help") {
       console.log("Commands:");
       console.log("  /save       — Save current session");
@@ -213,6 +313,8 @@ export async function startRepl(params: {
       console.log("  /plan       — Enter plan mode (read-only, no modifications)");
       console.log("  /execute    — Exit plan mode (allow modifications)");
       console.log("  /compact    — Compact conversation history");
+      console.log("  /cost       — Show token usage and estimated cost");
+      console.log("  /init       — Generate ATLAS.md for this project");
       console.log("  /context    — Show loaded project context path");
       console.log("  /agent <name>  — Invoke a subagent for one turn");
       console.log("  /agents        — List available subagents");
@@ -225,6 +327,7 @@ export async function startRepl(params: {
           console.log(`  /${cmd.name}${desc}`);
         }
       }
+      console.log("\n  @file.ts    — Inject file content into your prompt (e.g. @src/cli.ts)");
       return true;
     }
 
@@ -274,9 +377,13 @@ export async function startRepl(params: {
           console.log("No input provided, cancelled.");
           return true;
         }
-        messages.push({ role: "user", content: subInput.trim() });
+        await runLifecycleHooks(hooks?.UserPromptSubmit ?? [], { ATLAS_PROMPT: subInput.trim().slice(0, 500) });
+        const processed = await processAtMentions(subInput.trim(), process.cwd());
+        messages.push({ role: "user", content: processed });
       } else {
-        messages.push({ role: "user", content: userPrompt });
+        await runLifecycleHooks(hooks?.UserPromptSubmit ?? [], { ATLAS_PROMPT: userPrompt.slice(0, 500) });
+        const processed = await processAtMentions(userPrompt, process.cwd());
+        messages.push({ role: "user", content: processed });
       }
 
       const controller = new AbortController();
@@ -284,21 +391,35 @@ export async function startRepl(params: {
       process.on("SIGINT", onSigint);
 
       try {
-        await runAgentLoop({
-          provider,
+        isAgentRunning = true;
+        controllerRef.current = controller;
+        const subProvider = profile.model
+          ? provider.withModel(profile.model)
+          : params.subagentModel
+            ? provider.withModel(params.subagentModel)
+            : provider;
+
+        const result = await runAgentLoop({
+          provider: subProvider,
           messages,
           toolRegistry: filteredRegistry,
           executor,
           systemPrompt: profile.systemPrompt,
           abortSignal: controller.signal,
         });
+        sessionInputTokens += result.inputTokens;
+        sessionOutputTokens += result.outputTokens;
+        console.log(chalk.gray(`\n[tokens: ${formatTokenCount(result.inputTokens)} in / ${formatTokenCount(result.outputTokens)} out | session: ${formatTokenCount(sessionInputTokens)} in / ${formatTokenCount(sessionOutputTokens)} out]`));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`\nError: ${msg}`);
       } finally {
+        isAgentRunning = false;
+        controllerRef.current = null;
         process.removeListener("SIGINT", onSigint);
       }
 
+      await runLifecycleHooks(hooks?.Stop ?? [], { ATLAS_SESSION_ID: currentSessionId });
       saveSession(buildSession()).catch(() => {});
       process.stdout.write("\n");
       return true;
@@ -317,14 +438,18 @@ export async function startRepl(params: {
         if (cmdArgs) {
           fullPrompt += `\n\nUser argument: ${cmdArgs}`;
         }
-        messages.push({ role: "user", content: fullPrompt });
+        await runLifecycleHooks(hooks?.UserPromptSubmit ?? [], { ATLAS_PROMPT: fullPrompt.slice(0, 500) });
+        const processedPrompt = await processAtMentions(fullPrompt, process.cwd());
+        messages.push({ role: "user", content: processedPrompt });
 
         const controller = new AbortController();
         const onSigint = () => controller.abort();
         process.on("SIGINT", onSigint);
 
         try {
-          await runAgentLoop({
+          isAgentRunning = true;
+          controllerRef.current = controller;
+          const result = await runAgentLoop({
             provider,
             messages,
             toolRegistry: planMode.isActive() ? planMode.filterRegistry(toolRegistry) : toolRegistry,
@@ -332,13 +457,19 @@ export async function startRepl(params: {
             systemPrompt,
             abortSignal: controller.signal,
           });
+          sessionInputTokens += result.inputTokens;
+          sessionOutputTokens += result.outputTokens;
+          console.log(chalk.gray(`\n[tokens: ${formatTokenCount(result.inputTokens)} in / ${formatTokenCount(result.outputTokens)} out | session: ${formatTokenCount(sessionInputTokens)} in / ${formatTokenCount(sessionOutputTokens)} out]`));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`\nError: ${msg}`);
         } finally {
+          isAgentRunning = false;
+          controllerRef.current = null;
           process.removeListener("SIGINT", onSigint);
         }
 
+        await runLifecycleHooks(hooks?.Stop ?? [], { ATLAS_SESSION_ID: currentSessionId });
         saveSession(buildSession()).catch(() => {});
         process.stdout.write("\n");
         return true;
@@ -362,9 +493,11 @@ export async function startRepl(params: {
       if (handled) continue;
     }
 
+    await runLifecycleHooks(hooks?.UserPromptSubmit ?? [], { ATLAS_PROMPT: trimmed.slice(0, 500) });
+    const processedContent = await processAtMentions(trimmed, process.cwd());
     const userContent = planMode.isActive()
-      ? "[PLAN MODE: You can only read and analyze. Do NOT suggest tool calls for write_file, edit_file, or bash. Design your approach and explain what changes you would make.]\n\n" + trimmed
-      : trimmed;
+      ? "[PLAN MODE: You can only read and analyze. Do NOT suggest tool calls for write_file, edit_file, or bash. Design your approach and explain what changes you would make.]\n\n" + processedContent
+      : processedContent;
 
     messages.push({ role: "user", content: userContent });
 
@@ -373,7 +506,9 @@ export async function startRepl(params: {
     process.on("SIGINT", onSigint);
 
     try {
-      await runAgentLoop({
+      isAgentRunning = true;
+      controllerRef.current = controller;
+      const result = await runAgentLoop({
         provider,
         messages,
         toolRegistry: planMode.isActive() ? planMode.filterRegistry(toolRegistry) : toolRegistry,
@@ -381,10 +516,16 @@ export async function startRepl(params: {
         systemPrompt,
         abortSignal: controller.signal,
       });
+      sessionInputTokens += result.inputTokens;
+      sessionOutputTokens += result.outputTokens;
+      console.log(chalk.gray(`\n[tokens: ${formatTokenCount(result.inputTokens)} in / ${formatTokenCount(result.outputTokens)} out | session: ${formatTokenCount(sessionInputTokens)} in / ${formatTokenCount(sessionOutputTokens)} out]`));
+      await runLifecycleHooks(hooks?.Stop ?? [], { ATLAS_SESSION_ID: currentSessionId });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${msg}`);
     } finally {
+      isAgentRunning = false;
+      controllerRef.current = null;
       process.removeListener("SIGINT", onSigint);
     }
 
@@ -401,5 +542,6 @@ export async function startRepl(params: {
     process.stdout.write("\n");
   }
 
+  await runLifecycleHooks(hooks?.SessionEnd ?? [], { ATLAS_SESSION_ID: currentSessionId, ATLAS_CWD: process.cwd() });
   rl.close();
 }

@@ -9,6 +9,7 @@ export interface SubagentProfile {
   systemPrompt: string;
   allowedTools: string[];
   restrictedTools?: string[];
+  model?: string;
 }
 
 export const BUILTIN_SUBAGENTS: SubagentProfile[] = [
@@ -117,6 +118,7 @@ export function parseSubagentFile(content: string, filePath: string): SubagentPr
   let description = "";
   let allowedTools: string[] = [];
   let restrictedTools: string[] = [];
+  let model: string | undefined;
   let systemPrompt = content;
 
   const fmRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -137,6 +139,8 @@ export function parseSubagentFile(content: string, filePath: string): SubagentPr
         allowedTools = val.split(",").map((s) => s.trim()).filter(Boolean);
       } else if (key === "restricted_tools" && val) {
         restrictedTools = val.split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (key === "model" && val) {
+        model = val;
       }
     }
     systemPrompt = content.slice(m[0].length);
@@ -144,5 +148,5 @@ export function parseSubagentFile(content: string, filePath: string): SubagentPr
 
   systemPrompt = systemPrompt.replace(/^﻿/, "").trim();
 
-  return { name, description, systemPrompt, allowedTools, restrictedTools };
+  return { name, description, systemPrompt, allowedTools, restrictedTools, model };
 }

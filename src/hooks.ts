@@ -11,10 +11,21 @@ export interface HookDefinition {
 export interface HooksConfig {
   PreToolUse: HookDefinition[];
   PostToolUse: HookDefinition[];
+  SessionStart: HookDefinition[];
+  SessionEnd: HookDefinition[];
+  UserPromptSubmit: HookDefinition[];
+  Stop: HookDefinition[];
 }
 
 export async function loadHooks(cwd: string): Promise<HooksConfig> {
-  const result: HooksConfig = { PreToolUse: [], PostToolUse: [] };
+  const result: HooksConfig = {
+    PreToolUse: [],
+    PostToolUse: [],
+    SessionStart: [],
+    SessionEnd: [],
+    UserPromptSubmit: [],
+    Stop: [],
+  };
 
   const globalPath = join(homedir(), ".atlas", "settings.json");
   const localPath = join(cwd, ".atlas", "settings.json");
@@ -29,6 +40,18 @@ export async function loadHooks(cwd: string): Promise<HooksConfig> {
         }
         if (Array.isArray(parsed.hooks.PostToolUse)) {
           result.PostToolUse.push(...parsed.hooks.PostToolUse);
+        }
+        if (Array.isArray(parsed.hooks.SessionStart)) {
+          result.SessionStart.push(...parsed.hooks.SessionStart);
+        }
+        if (Array.isArray(parsed.hooks.SessionEnd)) {
+          result.SessionEnd.push(...parsed.hooks.SessionEnd);
+        }
+        if (Array.isArray(parsed.hooks.UserPromptSubmit)) {
+          result.UserPromptSubmit.push(...parsed.hooks.UserPromptSubmit);
+        }
+        if (Array.isArray(parsed.hooks.Stop)) {
+          result.Stop.push(...parsed.hooks.Stop);
         }
       }
     } catch {
@@ -91,5 +114,15 @@ export async function runHook(
       };
     }
     return { exitCode: 1, stdout: "" };
+  }
+}
+
+export async function runLifecycleHooks(hooks: HookDefinition[], env: Record<string, string>): Promise<void> {
+  for (const hook of hooks) {
+    try {
+      await runHook(hook, env);
+    } catch {
+      // best-effort, never block
+    }
   }
 }

@@ -7,15 +7,41 @@ import { ToolExecutor } from "./tools/executor.js";
 import { builtinTools } from "./tools/builtin/index.js";
 import { PermissionSession } from "./permissions/session.js";
 import { startRepl } from "./repl.js";
+import { runHeadless } from "./headless.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./agent/system_prompt.js";
-import { loadSession } from "./sessions.js";
+import { listSessions, loadSession } from "./sessions.js";
 import { loadProjectContext, findProjectContextPath } from "./agent/context_loader.js";
 import { loadCommands } from "./commands.js";
 import { loadCustomSubagents, BUILTIN_SUBAGENTS } from "./agent/subagents.js";
 import type { ExecutionContext } from "./tools/types.js";
 
-function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string; plan?: boolean } {
-  const result: { model?: string; debug?: boolean; config?: string; systemPrompt?: string; systemPromptFile?: string; resume?: string; plan?: boolean } = {};
+function parseArgs(argv: string[]): {
+  model?: string;
+  debug?: boolean;
+  config?: string;
+  systemPrompt?: string;
+  systemPromptFile?: string;
+  resume?: string;
+  plan?: boolean;
+  print?: string;
+  yes?: boolean;
+  continue?: boolean;
+  json?: boolean;
+} {
+  const result: {
+    model?: string;
+    debug?: boolean;
+    config?: string;
+    systemPrompt?: string;
+    systemPromptFile?: string;
+    resume?: string;
+    plan?: boolean;
+    print?: string;
+    yes?: boolean;
+    continue?: boolean;
+    json?: boolean;
+  } = {};
+
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--model" && argv[i + 1]) {
@@ -32,8 +58,17 @@ function parseArgs(argv: string[]): { model?: string; debug?: boolean; config?: 
       result.resume = argv[++i];
     } else if (arg === "--plan") {
       result.plan = true;
+    } else if ((arg === "-p" || arg === "--print") && argv[i + 1]) {
+      result.print = argv[++i];
+    } else if (arg === "-y" || arg === "--yes") {
+      result.yes = true;
+    } else if (arg === "--continue") {
+      result.continue = true;
+    } else if (arg === "--json") {
+      result.json = true;
     }
   }
+
   return result;
 }
 
@@ -71,8 +106,20 @@ async function main() {
     process.exit(1);
   }
 
-  // Handle --resume flag
+  // Handle --continue / --resume flags
   let initialSession;
+  if (args.continue && !args.resume) {
+    const sessions = await listSessions();
+    if (sessions.length > 0) {
+      const last = sessions[0];
+      const session = await loadSession(last.id);
+      if (session) {
+        console.log(`Resuming last session ${session.id} (${session.messageCount} messages)`);
+        initialSession = session;
+      }
+    }
+  }
+
   if (args.resume) {
     const session = await loadSession(args.resume);
     if (!session) {
@@ -144,17 +191,33 @@ async function main() {
   }
 
   try {
-    await startRepl({
-      provider,
-      toolRegistry,
-      executor,
-      systemPrompt,
-      initialSession,
-      projectContextPath: projectContextPath ?? undefined,
-      commands,
-      startInPlanMode: args.plan,
-      subagents,
-    });
+    if (args.print) {
+      await runHeadless({
+        prompt: args.print,
+        provider,
+        toolRegistry,
+        executor,
+        permissions,
+        systemPrompt,
+        initialSession,
+        autoApprove: args.yes,
+        json: args.json,
+      });
+    } else {
+      await startRepl({
+        provider,
+        toolRegistry,
+        executor,
+        systemPrompt,
+        initialSession,
+        projectContextPath: projectContextPath ?? undefined,
+        commands,
+        startInPlanMode: args.plan,
+        subagents,
+        subagentModel: config.subagentModel,
+        hooks,
+      });
+    }
   } finally {
     await cleanup();
   }

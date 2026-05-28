@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
+    "build:binary": "bash scripts/build-binary.sh",
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest"

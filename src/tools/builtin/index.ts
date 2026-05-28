@@ -5,6 +5,9 @@ import { editFileTool } from "./edit_file.js";
 import { bashTool } from "./bash.js";
 import { grepTool } from "./grep.js";
 import { listDirectoryTool } from "./list_directory.js";
+import { globTool } from "./glob.js";
+import { webFetchTool } from "./web_fetch.js";
+import { todoReadTool, todoWriteTool } from "./todo.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -13,4 +16,8 @@ export const builtinTools: ToolDefinition[] = [
   bashTool,
   grepTool,
   listDirectoryTool,
+  globTool,
+  webFetchTool,
+  todoReadTool,
+  todoWriteTool,
 ];
