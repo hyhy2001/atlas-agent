@@ -305,8 +305,10 @@ export async function startRepl(params: {
 
     if (input === "/compact") {
       const before = messages.length;
-      messages = await compactMessages({ messages, provider, config: compactionCfg });
+      const result = await compactMessages({ messages, provider, config: compactionCfg });
+      messages = result.messages;
       console.log(`[Compacted: ${before} messages → ${messages.length} messages]`);
+      if (result.summary) console.log(`\n${result.summary}`);
       return true;
     }
 
@@ -817,8 +819,10 @@ Keep it under 150 lines, concise and useful as AI context.`;
     // Auto-compact if over threshold
     if (shouldCompact(messages, compactionCfg)) {
       const before = messages.length;
-      messages = await compactMessages({ messages, provider, config: compactionCfg });
+      const result = await compactMessages({ messages, provider, config: compactionCfg });
+      messages = result.messages;
       console.log(`[Compacted: ${before} messages → ${messages.length} messages]`);
+      if (result.summary) console.log(`\n${result.summary}`);
     }
 
     // Auto-save after each agent turn (fire-and-forget)

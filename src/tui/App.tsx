@@ -441,8 +441,9 @@ export const App: React.FC<AppProps> = (props) => {
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
         const before = messagesRef.current.length;
-        messagesRef.current = await compactMessages({ messages: messagesRef.current, provider: props.provider, config: DEFAULT_COMPACTION_CONFIG });
-        addSystem(`[Compacted: ${before} messages → ${messagesRef.current.length} messages]`);
+        const result = await compactMessages({ messages: messagesRef.current, provider: props.provider, config: DEFAULT_COMPACTION_CONFIG });
+        messagesRef.current = result.messages;
+        addSystem(`[Compacted: ${before} → ${result.messages.length} messages]\n\n${result.summary}`);
       }
       saveSession(buildSession()).catch(() => {});
     } catch (err) {
@@ -542,8 +543,22 @@ export const App: React.FC<AppProps> = (props) => {
     }
     if (value === "/compact") {
       const before = messagesRef.current.length;
-      messagesRef.current = await compactMessages({ messages: messagesRef.current, provider: props.provider, config: DEFAULT_COMPACTION_CONFIG });
-      addSystem(`[Compacted: ${before} messages → ${messagesRef.current.length} messages]`);
+      if (before === 0) {
+        addSystem("Nothing to compact.");
+        return true;
+      }
+      addSystem("Compacting conversation...");
+      try {
+        const result = await compactMessages({
+          messages: messagesRef.current,
+          provider: props.provider,
+          config: DEFAULT_COMPACTION_CONFIG,
+        });
+        messagesRef.current = result.messages;
+        addSystem(`Compacted ${before} → ${result.messages.length} messages.\n\n## Summary\n\n${result.summary}`);
+      } catch (err) {
+        addSystem(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return true;
     }
     if (value === "/cost") {

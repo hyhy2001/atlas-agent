@@ -8,16 +8,33 @@ export interface CompactionConfig {
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   maxTokenEstimate: 80000,
-  keepRecentMessages: 10,
+  keepRecentMessages: 6,
 };
 
-const SUMMARIZATION_PROMPT = `Summarize this conversation concisely. Include:
-- Key decisions made
-- Files that were read or modified
-- Current state of the task
-- Any pending items or blockers
+const SUMMARIZATION_PROMPT = `You are summarizing a coding assistant conversation to preserve context across a context window reset.
 
-Be brief but preserve critical context. Output only the summary, no preamble.`;
+Produce a structured summary with these exact sections:
+
+## What was accomplished
+- Bullet list of completed tasks, fixes, features implemented
+
+## Current state
+- What the user is currently working on
+- Where things stand right now
+
+## Files modified
+- List of files that were created, edited, or deleted (with brief note on what changed)
+
+## Key decisions & context
+- Architecture decisions made
+- Important constraints or requirements discovered
+- Anything the assistant should remember going forward
+
+## Pending / next steps
+- Unfinished tasks
+- Things the user mentioned wanting to do next
+
+Be specific and concrete. Include file paths, function names, error messages where relevant. This summary will replace the conversation history — the assistant must be able to continue work from this summary alone.`;
 
 export function estimateTokens(messages: MessageParam[]): number {
   let chars = 0;
@@ -40,11 +57,11 @@ export async function compactMessages(params: {
   messages: MessageParam[];
   provider: OpenAIProvider;
   config: CompactionConfig;
-}): Promise<MessageParam[]> {
+}): Promise<{ messages: MessageParam[]; summary: string }> {
   const { messages, provider, config } = params;
 
   if (messages.length <= config.keepRecentMessages) {
-    return messages;
+    return { messages, summary: "" };
   }
 
   const splitIndex = messages.length - config.keepRecentMessages;
@@ -67,8 +84,11 @@ export async function compactMessages(params: {
 
   const summary = await provider.complete(summarizeMessages, SUMMARIZATION_PROMPT);
 
-  return [
-    { role: "user", content: `[Conversation summary]\n\n${summary}` },
-    ...toKeep,
-  ];
+  return {
+    messages: [
+      { role: "user", content: `[Previous conversation summary — read this to understand context]\n\n${summary}` },
+      ...toKeep,
+    ],
+    summary,
+  };
 }
