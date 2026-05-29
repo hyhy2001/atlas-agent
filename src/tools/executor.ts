@@ -33,8 +33,11 @@ function getToolSummary(name: string, input: unknown): string {
       return (inp.url as string)?.slice(0, 60) ?? "";
     case "delegate":
       return String(inp.agent ?? "");
-    default:
-      return "";
+    default: {
+      // For MCP tools (e.g. codebase-memory__search_graph), show first meaningful arg
+      const firstVal = Object.values(inp).find(v => typeof v === "string" && v.length > 0);
+      return firstVal ? String(firstVal).slice(0, 60) : "";
+    }
   }
 }
 
