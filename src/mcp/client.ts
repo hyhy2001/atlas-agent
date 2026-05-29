@@ -106,9 +106,18 @@ export class McpClient {
       } catch (connErr) {
         const cmsg = connErr instanceof Error ? connErr.message : String(connErr);
         const detail = stderrBuf.trim();
-        console.warn(`MCP server "${config.name}" failed to connect: ${cmsg}`);
-        if (detail) {
-          console.warn(`  ${config.name} stderr: ${detail.split("\n").slice(-3).join(" | ")}`);
+        // Detect glibc version mismatch — common on older Linux distros
+        if (detail.includes("GLIBC_") && detail.includes("not found")) {
+          const match = detail.match(/GLIBC_[\d.]+/g);
+          const versions = match ? [...new Set(match)].join(", ") : "unknown";
+          console.warn(`MCP server "${config.name}": binary requires ${versions} but your system has an older glibc.`);
+          console.warn(`  Code intelligence (codebase-memory) will be disabled.`);
+          console.warn(`  Atlas works fine without it — only code graph search is unavailable.`);
+        } else {
+          console.warn(`MCP server "${config.name}" failed to connect: ${cmsg}`);
+          if (detail) {
+            console.warn(`  ${config.name} stderr: ${detail.split("\n").slice(-3).join(" | ")}`);
+          }
         }
         return null;
       }
