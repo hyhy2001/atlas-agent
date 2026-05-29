@@ -20,7 +20,7 @@ for (const { key, target, ext } of TARGETS) {
 
   const r = spawnSync(
     "bun",
-    ["build", "--compile", "--minify", `--target=${target}`, "./src/cli.ts", `--outfile=${outFile}`],
+    ["build", "--compile", "--minify", "--external", "react-devtools-core", `--target=${target}`, "./src/cli.ts", `--outfile=${outFile}`],
     { stdio: "pipe" }
   );
 
