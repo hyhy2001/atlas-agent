@@ -251,7 +251,7 @@ export const applyPatchTool: ToolDefinition = {
       plannedWrites.set(fullPath, modified);
     }
 
-    const summary: string[] = [];
+    const changes: Array<{ path: string; before: string | null; after: string | null; type: "create" | "modify" | "delete" }> = [];
     for (const [fullPath, newContent] of plannedWrites) {
       const original = fileSnapshots.get(fullPath) ?? null;
       pushUndo({ path: fullPath, previousContent: original, timestamp: Date.now() });
@@ -259,21 +259,29 @@ export const applyPatchTool: ToolDefinition = {
       const relPath = fullPath.replace(ctx.workingDir + "/", "");
       if (newContent === null) {
         await unlink(fullPath);
-        summary.push(`  delete: ${relPath}`);
+        changes.push({ path: relPath, before: original, after: null, type: "delete" });
       } else {
         await mkdir(dirname(fullPath), { recursive: true });
         await writeFile(fullPath, newContent, "utf-8");
-        if (original === null) {
-          summary.push(`  add:    ${relPath}`);
-        } else {
-          summary.push(`  update: ${relPath}`);
-        }
+        changes.push({
+          path: relPath,
+          before: original,
+          after: newContent,
+          type: original === null ? "create" : "modify",
+        });
       }
     }
 
+    const { formatToolDiff, formatNewFile, DIFF_PREFIX } = await import("./diff_helper.js");
+    const parts = changes.map(c => {
+      if (c.type === "create") return formatNewFile(c.path, c.after ?? "").replace(DIFF_PREFIX, "");
+      if (c.type === "delete") return `${c.path} (deleted)`;
+      return formatToolDiff(c.path, c.before ?? "", c.after ?? "").replace(DIFF_PREFIX, "");
+    });
+
     return {
       toolUseId: "",
-      content: `Applied ${ops.length} operation(s):\n${summary.join("\n")}`,
+      content: DIFF_PREFIX + parts.join("\n\n"),
       isError: false,
     };
   },

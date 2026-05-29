@@ -47,7 +47,8 @@ export const editFileTool: ToolDefinition = {
       const newContent = content.replace(old_string, new_string);
       pushUndo({ path: fullPath, previousContent: content, timestamp: Date.now() });
       await writeFile(fullPath, newContent, "utf-8");
-      return { toolUseId: "", content: `File edited: ${fullPath}`, isError: false };
+      const { formatToolDiff } = await import("./diff_helper.js");
+      return { toolUseId: "", content: formatToolDiff(path, content, newContent), isError: false };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { toolUseId: "", content: `Error editing file: ${msg}`, isError: true };

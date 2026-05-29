@@ -150,6 +150,40 @@ function formatToolResult(text: string, maxLines = 5): { preview: string; hidden
   };
 }
 
+const DIFF_MARKER = "__ATLAS_DIFF__";
+
+function isDiffOutput(text: string): boolean {
+  return text.startsWith(DIFF_MARKER);
+}
+
+interface DiffLine {
+  type: "header" | "hunk" | "add" | "remove" | "context" | "ellipsis";
+  lineNum?: number;
+  text: string;
+}
+
+function parseDiffOutput(text: string): { header: string; lines: DiffLine[] } {
+  const body = text.slice(DIFF_MARKER.length);
+  const [header, ...rest] = body.split("\n");
+  const lines: DiffLine[] = [];
+  for (const raw of rest) {
+    if (raw.startsWith("@@HUNK@@")) {
+      lines.push({ type: "hunk", text: raw.slice("@@HUNK@@".length) });
+    } else if (raw.startsWith("…@@")) {
+      lines.push({ type: "ellipsis", text: raw.slice(3) });
+    } else {
+      const sep = raw.indexOf("@@");
+      if (sep === -1) continue;
+      const marker = raw[0];
+      const lineNum = parseInt(raw.slice(1, sep)) || 0;
+      const content = raw.slice(sep + 2);
+      const type = marker === "+" ? "add" : marker === "-" ? "remove" : "context";
+      lines.push({ type, lineNum, text: content });
+    }
+  }
+  return { header, lines };
+}
+
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
@@ -876,7 +910,65 @@ export const App: React.FC<AppProps> = (props) => {
                 {entry.text && <Text color="gray" dimColor>{"(" + entry.text + ")"}</Text>}
               </Box>
             )}
-            {entry.type === "tool_result" && (() => {
+            {entry.type === "tool_result" && isDiffOutput(entry.text) && (() => {
+              const { header, lines } = parseDiffOutput(entry.text);
+              const indent = entry.nested ? 4 : 2;
+              const maxLines = 15;
+              const visibleLines = lines.slice(0, maxLines);
+              const hiddenCount = lines.length - visibleLines.length;
+              return (
+                <Box flexDirection="column" paddingLeft={indent}>
+                  <Box>
+                    <Text color="green">{"⎿  "}</Text>
+                    <Text bold>{header}</Text>
+                  </Box>
+                  {visibleLines.map((line, i) => {
+                    const lineNumStr = line.lineNum !== undefined ? String(line.lineNum).padStart(4, " ") : "    ";
+                    if (line.type === "add") {
+                      return (
+                        <Box key={i} paddingLeft={3}>
+                          <Text color="gray" dimColor>{lineNumStr + " "}</Text>
+                          <Text color="green">+ {line.text}</Text>
+                        </Box>
+                      );
+                    }
+                    if (line.type === "remove") {
+                      return (
+                        <Box key={i} paddingLeft={3}>
+                          <Text color="gray" dimColor>{lineNumStr + " "}</Text>
+                          <Text color="red">- {line.text}</Text>
+                        </Box>
+                      );
+                    }
+                    if (line.type === "context") {
+                      return (
+                        <Box key={i} paddingLeft={3}>
+                          <Text color="gray" dimColor>{lineNumStr + "   " + line.text}</Text>
+                        </Box>
+                      );
+                    }
+                    if (line.type === "hunk") {
+                      return (
+                        <Box key={i} paddingLeft={3}>
+                          <Text color="cyan" dimColor>{line.text}</Text>
+                        </Box>
+                      );
+                    }
+                    return (
+                      <Box key={i} paddingLeft={3}>
+                        <Text color="gray" dimColor>{line.text}</Text>
+                      </Box>
+                    );
+                  })}
+                  {hiddenCount > 0 && (
+                    <Box paddingLeft={3}>
+                      <Text color="gray" dimColor>{"  … +" + hiddenCount + " more lines"}</Text>
+                    </Box>
+                  )}
+                </Box>
+              );
+            })()}
+            {entry.type === "tool_result" && !isDiffOutput(entry.text) && (() => {
               const { preview, hidden } = formatToolResult(entry.text);
               const lines = preview.split("\n");
               const indent = entry.nested ? 4 : 2;

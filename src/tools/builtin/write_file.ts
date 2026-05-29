@@ -25,7 +25,11 @@ export const writeFileTool: ToolDefinition = {
       try { previousContent = await readFile(fullPath, "utf-8"); } catch {}
       pushUndo({ path: fullPath, previousContent, timestamp: Date.now() });
       await writeFile(fullPath, content, "utf-8");
-      return { toolUseId: "", content: `File written: ${fullPath}`, isError: false };
+      const { formatToolDiff, formatNewFile } = await import("./diff_helper.js");
+      const diff = previousContent === null
+        ? formatNewFile(path, content)
+        : formatToolDiff(path, previousContent, content);
+      return { toolUseId: "", content: diff, isError: false };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { toolUseId: "", content: `Error writing file: ${msg}`, isError: true };
