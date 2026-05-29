@@ -15,6 +15,7 @@ import { applyPatchTool } from "./apply_patch.js";
 import { readManyFilesTool } from "./read_many_files.js";
 import { analyzeLogTool } from "./analyze_log.js";
 import { askUserQuestionTool } from "./ask_user_question.js";
+import { lspTool } from "./lsp.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -41,4 +42,5 @@ export const builtinTools: ToolDefinition[] = [
   readManyFilesTool,
   analyzeLogTool,
   askUserQuestionTool,
+  lspTool,
 ];
