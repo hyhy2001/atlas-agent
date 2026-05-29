@@ -208,19 +208,23 @@ install-mcp:
 ## build-mcp: Build codebase-memory-mcp from source (use when release binary is glibc-incompatible)
 build-mcp:
 	@echo "Building codebase-memory-mcp from source..."
-	@command -v gcc >/dev/null 2>&1 || { echo "  ✗ gcc not found. Install: sudo apt install build-essential zlib1g-dev"; exit 1; }
+	@command -v gcc >/dev/null 2>&1 || { echo "  ✗ gcc not found"; exit 1; }
 	@command -v git >/dev/null 2>&1 || { echo "  ✗ git not found"; exit 1; }
-	@if [ ! -f /usr/include/zlib.h ] && [ ! -f /usr/local/include/zlib.h ]; then \
-	  echo "  ✗ zlib headers not found. Install: sudo apt install zlib1g-dev"; exit 1; \
-	fi
+	@echo '#include <zlib.h>' | gcc -E -x c - >/dev/null 2>&1 || { \
+	  echo "  ✗ zlib headers not found by gcc."; \
+	  echo "    If your sysadmin can install: zlib1g-dev (Debian/Ubuntu) or zlib-devel (Fedora/RHEL)"; \
+	  echo "    Or set CPATH/C_INCLUDE_PATH if zlib is in a non-standard location"; \
+	  exit 1; \
+	}
 	@mkdir -p $(DEPS_DIR)
 	@rm -rf $(DEPS_DIR)/cbm-source
 	@echo "  Cloning source..."
 	@git clone --depth=1 https://github.com/DeusData/codebase-memory-mcp.git $(DEPS_DIR)/cbm-source 2>&1 | tail -3
-	@echo "  Building (~2-3 minutes)..."
+	@echo "  Building (~3-5 minutes — compiling 155 tree-sitter grammars)..."
 	@cd $(DEPS_DIR)/cbm-source && bash scripts/build.sh 2>&1 | tail -5
 	@if [ ! -f "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" ]; then \
-	  echo "  ✗ Build failed — binary not produced"; exit 1; \
+	  echo "  ✗ Build failed — binary not produced. Check $(DEPS_DIR)/cbm-source/build.log"; \
+	  exit 1; \
 	fi
 	@mkdir -p .atlas/bin
 	@cp "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" .atlas/bin/codebase-memory-mcp
