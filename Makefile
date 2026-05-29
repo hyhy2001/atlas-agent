@@ -133,12 +133,12 @@ install-bun:
 ## deps: Install npm dependencies
 deps:
 	@echo "Installing npm dependencies..."
-	@SKIP_BINARY_BUILD=1 $(NPM) install --silent
+	@SKIP_BINARY_BUILD=1 $(NPM) install --include=dev --silent
 
 ## build: Compile TypeScript
 build:
 	@echo "Building TypeScript..."
-	@$(NPM) run build --silent
+	@PATH="$(CURDIR)/node_modules/.bin:$$PATH" $(NPM) run build --silent
 
 ## binary: Build binary for current OS
 binary:
