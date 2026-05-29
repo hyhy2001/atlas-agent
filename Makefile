@@ -1,4 +1,4 @@
-.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun
+.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp
 
 # Detect OS and arch
 OS     := $(shell uname -s 2>/dev/null || echo Windows)
@@ -58,8 +58,8 @@ BUN  := $(shell command -v bun  2>/dev/null || echo $(BUN_BIN))
 # Default target
 all: install
 
-## install: Full install — download deps if needed, build, binary, symlink
-install: ensure-node ensure-bun deps build binary symlink
+## install: Full install — download deps if needed, build, binary, MCP, symlink
+install: ensure-node ensure-bun deps build binary install-mcp symlink
 	@echo ""
 	@echo "✓ atlas-agent installed successfully"
 	@echo ""
@@ -136,6 +136,38 @@ symlink:
 	@mkdir -p $(LOCAL_BIN)
 	@ln -sf "$(CURDIR)/$(BINARY_PATH)" $(SYMLINK)
 	@echo "  ✓ $(SYMLINK) → $(CURDIR)/$(BINARY_PATH)"
+
+## install-mcp: Download codebase-memory-mcp into .atlas/bin/
+install-mcp:
+	@echo "Installing codebase-memory-mcp..."
+	@mkdir -p .atlas/bin
+	@if [ -f .atlas/bin/codebase-memory-mcp ] || [ -f .atlas/bin/codebase-memory-mcp.exe ]; then \
+	  echo "  ✓ Already installed"; \
+	else \
+	  case "$(PLATFORM)-$(ARCH_NAME)" in \
+	    linux-x64)     ASSET="codebase-memory-mcp-linux-x86_64.tar.gz" ;; \
+	    linux-arm64)   ASSET="codebase-memory-mcp-linux-aarch64.tar.gz" ;; \
+	    darwin-arm64)  ASSET="codebase-memory-mcp-macos-aarch64.tar.gz" ;; \
+	    darwin-x64)    ASSET="codebase-memory-mcp-macos-x86_64.tar.gz" ;; \
+	    windows-x64)   ASSET="codebase-memory-mcp-windows-x86_64.zip" ;; \
+	    *) echo "  Warning: no MCP binary for $(PLATFORM)-$(ARCH_NAME), skipping"; exit 0 ;; \
+	  esac; \
+	  URL="https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/$$ASSET"; \
+	  echo "  Downloading: $$URL"; \
+	  TMPFILE=".atlas/bin/_download.tmp"; \
+	  if curl -fsSL "$$URL" -o "$$TMPFILE"; then \
+	    case "$$ASSET" in \
+	      *.tar.gz) tar -xzf "$$TMPFILE" -C .atlas/bin ;; \
+	      *.zip)    unzip -o "$$TMPFILE" -d .atlas/bin >/dev/null ;; \
+	    esac; \
+	    chmod +x .atlas/bin/codebase-memory-mcp 2>/dev/null || true; \
+	    rm -f "$$TMPFILE"; \
+	    echo "  ✓ Installed to .atlas/bin/"; \
+	  else \
+	    rm -f "$$TMPFILE"; \
+	    echo "  Warning: download failed. Atlas will work without code intelligence."; \
+	  fi; \
+	fi
 
 ## build-all: Build binaries for all platforms
 build-all: ensure-node ensure-bun deps build
