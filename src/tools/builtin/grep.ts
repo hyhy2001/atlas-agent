@@ -26,7 +26,7 @@ export const grepTool: ToolDefinition = {
     };
 
     const searchPath = resolve(ctx.workingDir, path);
-    const args = ["-rn"];
+    const args = ["-r", "-n"];
     if (include) {
       args.push(`--include=${include}`);
     }
@@ -49,12 +49,20 @@ export const grepTool: ToolDefinition = {
       });
 
       child.on("close", () => {
-        let content = output.trim();
+        const lines = output.trim().split("\n").filter(Boolean);
+        if (lines.length === 0) {
+          resolvePromise({ toolUseId: "", content: "No matches found.", isError: false });
+          return;
+        }
+
+        const truncated = lines.map((line) => {
+          if (line.length > 200) return line.slice(0, 200) + "…";
+          return line;
+        });
+        const header = `${lines.length} match${lines.length === 1 ? "" : "es"}`;
+        let content = `${header}\n${truncated.join("\n")}`;
         if (content.length > MAX_OUTPUT) {
           content = content.slice(0, MAX_OUTPUT) + "\n[Output truncated]";
-        }
-        if (!content) {
-          content = "No matches found";
         }
         resolvePromise({ toolUseId: "", content, isError: false });
       });

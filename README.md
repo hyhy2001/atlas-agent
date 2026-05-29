@@ -5,7 +5,7 @@ AI Coding Assistant CLI with a leader/executor architecture, designed for intern
 ## Features
 
 - **Leader/executor architecture**: A capable model orchestrates while cheaper/faster models execute. Saves cost and improves throughput.
-- **34 built-in tools**: file I/O, shell, git, web, code intelligence (MCP), memory, todos
+- **24 built-in tools**: file I/O, shell, git, web, code intelligence (MCP), memory, todos
 - **Three executor tiers**:
   - `atlas-swift` — mechanical edits (exact old → new replacements)
   - `atlas-forge` — default executor for features, refactors, tests

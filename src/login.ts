@@ -87,7 +87,7 @@ function saveCredentials(creds: Credentials): void {
 }
 
 export function hasCredentials(): boolean {
-  if (process.env["ATLAS_AUTH_TOKEN"] || process.env["ATLAS_API_KEY"]) return true;
+  if (process.env["ATLAS_AUTH_TOKEN"]) return true;
   const configPath = paths.config();
   if (!existsSync(configPath)) return false;
   try {

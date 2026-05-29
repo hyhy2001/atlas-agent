@@ -137,7 +137,7 @@ async function main() {
     console.log(`Loaded ${memory.length} memory entries`);
   }
 
-  let apiKey = config.authToken || process.env["ATLAS_API_KEY"] || "";
+  let apiKey = config.authToken || process.env["ATLAS_AUTH_TOKEN"] || "";
   let baseURLOverride = config.baseURL;
 
   if (!apiKey) {

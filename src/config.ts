@@ -96,6 +96,4 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   const resolved = resolveMcpCommands(config.mcpServers, atlasRoot());
   return { ...config, mcpServers: resolved };
-
-  return config;
 }
