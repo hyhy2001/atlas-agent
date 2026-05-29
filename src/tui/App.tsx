@@ -42,7 +42,23 @@ interface HistoryEntry {
   fullText?: string;
   toolName?: string;
   isError?: boolean;
+  nested?: boolean;
 }
+
+const STATUS_VERBS = [
+  "Working", "Thinking", "Analyzing", "Planning", "Searching",
+  "Reasoning", "Processing", "Investigating", "Synthesizing", "Exploring",
+];
+
+const TIPS = [
+  "Use /plan to enter plan mode before making changes",
+  "Use /compact to summarize the conversation and free up context",
+  "Use /diff to see all changes made this session",
+  "Use /agent to switch between subagent profiles",
+  "Use /cost to see token usage and estimated cost",
+  "Ctrl+O expands truncated tool output",
+  "Use /clear to start a fresh session",
+];
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "clear", "context", "plan", "execute", "compact", "cost", "stats",
@@ -115,6 +131,8 @@ export const App: React.FC<AppProps> = (props) => {
   const [liveTail, setLiveTail] = useState("");
   const [currentToolName, setCurrentToolName] = useState("");
   const [elapsedSecs, setElapsedSecs] = useState(0);
+  const [statusVerb, setStatusVerb] = useState("Working");
+  const [tip, setTip] = useState<string | null>(null);
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
@@ -145,6 +163,22 @@ export const App: React.FC<AppProps> = (props) => {
     if (!isRunning) { setSpinFrame(0); return; }
     const id = setInterval(() => setSpinFrame(f => (f + 1) % 10), 80);
     return () => clearInterval(id);
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!isRunning) { setStatusVerb("Working"); return; }
+    const id = setInterval(() => {
+      setStatusVerb(STATUS_VERBS[Math.floor(Math.random() * STATUS_VERBS.length)]);
+    }, 10000);
+    return () => clearInterval(id);
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!isRunning) { setTip(null); return; }
+    const id = setTimeout(() => {
+      setTip(TIPS[Math.floor(Math.random() * TIPS.length)]);
+    }, 15000);
+    return () => clearTimeout(id);
   }, [isRunning]);
 
   useEffect(() => {
@@ -231,12 +265,12 @@ export const App: React.FC<AppProps> = (props) => {
 
     // Install tool callbacks on executor to capture tool call events when running in Ink mode
     try {
-      (props.executor as any)._onToolCall = (name: string, summary: string) => {
-        setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name }]);
-        setCurrentToolName(name);
+      (props.executor as any)._onToolCall = (name: string, summary: string, nested = false) => {
+        setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
+        if (!nested) setCurrentToolName(name);
       };
-      (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean) => {
-        setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError }]);
+      (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean, nested = false) => {
+        setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError, nested }]);
       };
     } catch (e) {}
 
@@ -564,6 +598,7 @@ export const App: React.FC<AppProps> = (props) => {
                 text: entry.fullText,
                 toolName: entry.toolName,
                 isError: entry.isError,
+                nested: entry.nested,
               }];
             }
             return h; // already short, nothing to expand
@@ -641,7 +676,7 @@ export const App: React.FC<AppProps> = (props) => {
               </Box>
             )}
             {entry.type === "tool_call" && (
-              <Box>
+              <Box paddingLeft={entry.nested ? 2 : 0}>
                 <Text color={entry.isError ? "red" : "green"}>{"● "}</Text>
                 <Text bold>{formatToolName(entry.toolName ?? "tool")}</Text>
                 {entry.text && <Text color="gray" dimColor>{"(" + entry.text + ")"}</Text>}
@@ -650,8 +685,9 @@ export const App: React.FC<AppProps> = (props) => {
             {entry.type === "tool_result" && (() => {
               const { preview, hidden } = formatToolResult(entry.text);
               const lines = preview.split("\n");
+              const indent = entry.nested ? 4 : 2;
               return (
-                <Box flexDirection="column" paddingLeft={2}>
+                <Box flexDirection="column" paddingLeft={indent}>
                   {lines.map((line, i) => (
                     <Box key={i}>
                       <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
@@ -667,7 +703,7 @@ export const App: React.FC<AppProps> = (props) => {
               );
             })()}
             {entry.type === "tool_result_full" && (
-              <Box flexDirection="column" paddingLeft={2}>
+              <Box flexDirection="column" paddingLeft={entry.nested ? 4 : 2}>
                 {entry.text.split("\n").map((line, i) => (
                   <Box key={i}>
                     <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
@@ -688,9 +724,16 @@ export const App: React.FC<AppProps> = (props) => {
         </Box>
       )}
       {isRunning && (
-        <Box>
-          <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
-          <Text color="gray"> Working · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
+        <Box flexDirection="column">
+          <Box>
+            <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
+            <Text color="gray"> {statusVerb} · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
+          </Box>
+          {tip && (
+            <Box>
+              <Text color="gray" dimColor>  Tip: {tip}</Text>
+            </Box>
+          )}
         </Box>
       )}
       {!isRunning && (

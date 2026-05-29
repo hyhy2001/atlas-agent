@@ -111,6 +111,20 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
 
   const subExecutor = new ToolExecutor(subRegistry, subCtx, hooks);
 
+  const leaderExecutor = (ctx as any)._executor;
+  const leaderOnToolCall = leaderExecutor ? (leaderExecutor as any)._onToolCall : null;
+  const leaderOnToolResult = leaderExecutor ? (leaderExecutor as any)._onToolResult : null;
+  if (leaderOnToolCall) {
+    (subExecutor as any)._onToolCall = (name: string, summary: string) => {
+      leaderOnToolCall(name, summary, true);
+    };
+  }
+  if (leaderOnToolResult) {
+    (subExecutor as any)._onToolResult = (name: string, result: string, isError: boolean) => {
+      leaderOnToolResult(name, result, isError, true);
+    };
+  }
+
   try {
     await runAgentLoop({
       provider: subProvider,

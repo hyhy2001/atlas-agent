@@ -222,6 +222,7 @@ async function main() {
   (ctx as any)._trustedDirs = config.trustedDirs;
 
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
+  (ctx as any)._executor = executor;
 
   const cleanup = async () => {
     for (const client of mcpClients) {
