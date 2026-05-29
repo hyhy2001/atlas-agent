@@ -347,7 +347,7 @@ export const App: React.FC<AppProps> = (props) => {
     const allCmds = [
       "/help","/save","/sessions","/load","/resume","/clear","/context",
       "/plan","/execute","/compact","/cost","/stats","/init","/bg",
-      "/diff","/undo","/agent","/agents","/model","/doctor",
+      "/diff","/undo","/agent","/agents","/model","/doctor","/mcp",
       "/worktree","/trust",
       ...(props.commands ?? []).map(c => `/${c.name}`),
     ];
@@ -751,12 +751,37 @@ export const App: React.FC<AppProps> = (props) => {
       return true;
     }
     if (value === "/help") {
-      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /bg [list|<cmd>|kill <id>|log <id>] : background bash jobs\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
+      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /bg [list|<cmd>|kill <id>|log <id>] : background bash jobs\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n  /mcp : list connected MCP servers and their tools\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
       return true;
     }
     if (value === "/agents") {
       const agents = props.subagents ?? listSubagents();
       addSystem("Available agents:\n" + agents.map(a => `  ${a.name}  — ${a.description}`).join("\n"));
+      return true;
+    }
+    if (value === "/mcp") {
+      const all = props.toolRegistry.getAll();
+      // MCP tools are named "<server>__<tool>"
+      const byServer = new Map<string, string[]>();
+      for (const tool of all) {
+        const sep = tool.name.indexOf("__");
+        if (sep > 0) {
+          const server = tool.name.slice(0, sep);
+          const toolName = tool.name.slice(sep + 2);
+          if (!byServer.has(server)) byServer.set(server, []);
+          byServer.get(server)!.push(toolName);
+        }
+      }
+      if (byServer.size === 0) {
+        addSystem("No MCP servers connected.\n\nMCP tools are configured in .atlas/settings.json under \"mcpServers\".\nIf codebase-memory shows \"command not found\" or a glibc error at startup,\nrun: make build-mcp  (builds the binary from source for your system).");
+      } else {
+        const lines: string[] = ["Connected MCP servers:"];
+        for (const [server, tools] of byServer) {
+          lines.push(`\n  ● ${server}  (${tools.length} tools)`);
+          for (const t of tools) lines.push(`      ${t}`);
+        }
+        addSystem(lines.join("\n"));
+      }
       return true;
     }
     if (value.startsWith("/agent ") || value === "/agent") {
