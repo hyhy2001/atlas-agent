@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
+
 import Spinner from "ink-spinner";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -423,7 +423,7 @@ export const App: React.FC<AppProps> = (props) => {
   };
 
   useInput((inputChar, key) => {
-    if (key.tab && suggestion) setInput(suggestion);
+    // Ctrl+C handling
     if (key.ctrl && inputChar === "c") {
       if (isRunning) {
         runningControllerRef.current?.abort();
@@ -436,6 +436,37 @@ export const App: React.FC<AppProps> = (props) => {
         ctrlCPressedAtRef.current = now;
         addSystem("(Press Ctrl+C again to exit)");
       }
+      return;
+    }
+
+    if (isRunning) return;
+
+    // Tab → accept suggestion
+    if (key.tab) {
+      if (suggestion) setInput(suggestion);
+      return;
+    }
+
+    // Enter → submit
+    if (key.return) {
+      const value = input;
+      setInput("");
+      if (value.trim()) handleSubmit(value);
+      return;
+    }
+
+    // Backspace
+    if (key.backspace || key.delete) {
+      setInput((s) => s.slice(0, -1));
+      return;
+    }
+
+    // Skip other special keys
+    if (key.escape || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.pageDown || key.pageUp || key.meta) return;
+
+    // Regular character — append
+    if (inputChar && !key.ctrl) {
+      setInput((s) => s + inputChar);
     }
   });
 
@@ -465,7 +496,8 @@ export const App: React.FC<AppProps> = (props) => {
         <Box flexDirection="column">
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
-            <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} placeholder="" />
+            <Text>{input}</Text>
+            <Text color="gray">█</Text>
             {suggestion && <Text color="gray" dimColor>{suggestion.slice(input.length)}</Text>}
           </Box>
           {input.startsWith("/") && input.length >= 1 && (
