@@ -5,6 +5,8 @@ deps/
 *.tsbuildinfo
 .env
 *.log
+
+# Atlas runtime data (project-level, per-project)
 .atlas/sessions/
 .atlas/cache/
 .atlas/telemetry/

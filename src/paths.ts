@@ -2,11 +2,14 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 
+/**
+ * Install directory — where the binary lives.
+ * Used for: global settings, MCP binaries, default commands/agents.
+ */
 export function getAtlasRoot(): string {
   const exe = process.execPath;
   const script = process.argv[1];
 
-  // Check portable: .atlas/settings.json next to binary or script
   const candidates = [
     dirname(resolve(exe)),
     dirname(resolve(script || "")),
@@ -18,7 +21,6 @@ export function getAtlasRoot(): string {
     }
   }
 
-  // Dev mode: cwd has package.json (we're in the project)
   const cwd = process.cwd();
   const scriptPath = script ? resolve(script) : "";
   const isDevCli = scriptPath.endsWith(join("dist", "cli.js")) || scriptPath.endsWith(join("src", "cli.ts"));
@@ -26,26 +28,44 @@ export function getAtlasRoot(): string {
     return cwd;
   }
 
-  // Fallback: home dir
   return join(homedir(), ".atlas-agent");
 }
 
-let _root: string | null = null;
-export function atlasRoot(): string {
-  if (!_root) _root = getAtlasRoot();
-  return _root;
+/**
+ * Project directory — where user invoked atlas-agent.
+ * Used for: per-project sessions, telemetry, memory, cache.
+ */
+export function getProjectRoot(): string {
+  return process.cwd();
 }
 
-// All paths under .atlas/
+let _atlasRoot: string | null = null;
+let _projectRoot: string | null = null;
+
+export function atlasRoot(): string {
+  if (!_atlasRoot) _atlasRoot = getAtlasRoot();
+  return _atlasRoot;
+}
+
+export function projectRoot(): string {
+  if (!_projectRoot) _projectRoot = getProjectRoot();
+  return _projectRoot;
+}
+
 export const paths = {
+  // Install-level (shared across all projects)
   root:       () => atlasRoot(),
   atlas:      () => join(atlasRoot(), ".atlas"),
   config:     () => join(atlasRoot(), ".atlas", "settings.json"),
-  sessions:   () => join(atlasRoot(), ".atlas", "sessions"),
-  telemetry:  () => join(atlasRoot(), ".atlas", "telemetry"),
-  cache:      () => join(atlasRoot(), ".atlas", "cache"),
-  memory:     () => join(atlasRoot(), ".atlas", "memory"),
+  bin:        () => join(atlasRoot(), ".atlas", "bin"),
   commands:   () => join(atlasRoot(), ".atlas", "commands"),
   agents:     () => join(atlasRoot(), ".atlas", "agents"),
-  bin:        () => join(atlasRoot(), ".atlas", "bin"),
+
+  // Project-level (per-project, based on cwd)
+  project:    () => projectRoot(),
+  projectAtlas: () => join(projectRoot(), ".atlas"),
+  sessions:   () => join(projectRoot(), ".atlas", "sessions"),
+  telemetry:  () => join(projectRoot(), ".atlas", "telemetry"),
+  cache:      () => join(projectRoot(), ".atlas", "cache"),
+  memory:     () => join(projectRoot(), ".atlas", "memory"),
 };
