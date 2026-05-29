@@ -164,14 +164,25 @@ binary:
 	@node scripts/patch-ink.mjs
 	@$(BUN) build --compile --minify --target=$(BUN_TARGET) ./src/cli.ts --outfile=$(BINARY_PATH)
 	@chmod +x $(BINARY_PATH) 2>/dev/null || true
-	@echo "  ✓ $(BINARY_PATH) ($$(du -sh $(BINARY_PATH) | cut -f1))"
+	@if [ ! -x $(BINARY_PATH) ]; then \
+	  echo "  ⚠ $(BINARY_PATH) not executable (noexec filesystem?) — symlink will use a node wrapper instead"; \
+	else \
+	  echo "  ✓ $(BINARY_PATH) ($$(du -sh $(BINARY_PATH) | cut -f1))"; \
+	fi
 
-## symlink: Symlink binary to ~/.local/bin
+## symlink: Symlink binary to ~/.local/bin (or wrapper script if noexec)
 symlink:
 	@echo "Linking to $(SYMLINK)..."
 	@mkdir -p $(LOCAL_BIN)
-	@ln -sf "$(CURDIR)/$(BINARY_PATH)" $(SYMLINK)
-	@echo "  ✓ $(SYMLINK) → $(CURDIR)/$(BINARY_PATH)"
+	@if [ -x "$(BINARY_PATH)" ]; then \
+	  ln -sf "$(CURDIR)/$(BINARY_PATH)" $(SYMLINK); \
+	  echo "  ✓ $(SYMLINK) → $(CURDIR)/$(BINARY_PATH)"; \
+	else \
+	  echo "  Binary not executable (noexec filesystem?), creating wrapper script instead..."; \
+	  printf '#!/bin/sh\nexec "$(NODE)" "$(CURDIR)/dist/cli.js" "$$@"\n' > $(SYMLINK); \
+	  chmod +x $(SYMLINK); \
+	  echo "  ✓ $(SYMLINK) (wrapper → node dist/cli.js)"; \
+	fi
 
 ## install-mcp: Download codebase-memory-mcp into .atlas/bin/
 install-mcp:
