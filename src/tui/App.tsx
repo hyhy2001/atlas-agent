@@ -1198,13 +1198,13 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         </Box>
       )}
       {!isRunning && (
-        <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={fullWidth}>
-          <Text color="gray">{(() => {
+        <Box paddingX={1}>
+          <Text color="gray" dimColor>{(() => {
             const parts: string[] = [];
-            if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens`);
+            if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓`);
             const m = props.provider.getModel();
-            if (m) parts.push(`model: ${m}`);
-            return ` ${parts.join("  ·  ")} `;
+            if (m && m !== "all" && m !== "default") parts.push(m);
+            return parts.length > 0 ? parts.join("  ·  ") : "";
           })()}</Text>
         </Box>
       )}
