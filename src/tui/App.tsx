@@ -71,6 +71,8 @@ interface OverlayItem {
   value: string;
 }
 
+interface AtSuggestion { path: string; indices?: number[] }
+
 type PermMode = "ask" | "auto" | "plan";
 const PERM_MODES: PermMode[] = ["ask", "auto", "plan"];
 const PERM_MODE_LABELS: Record<PermMode, string> = {
@@ -218,7 +220,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [permMode, setPermMode] = useState<PermMode>("ask");
   const [gitBranch, setGitBranch] = useState<string>("");
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
-  const [atSuggestions, setAtSuggestions] = useState<string[]>([]);
+  const [atSuggestions, setAtSuggestions] = useState<AtSuggestion[]>([]);
   const [atSuggestionIndex, setAtSuggestionIndex] = useState(0);
   const [slashCmdIndex, setSlashCmdIndex] = useState(0);
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
@@ -241,6 +243,7 @@ export const App: React.FC<AppProps> = (props) => {
   const startedAtRef = useRef<number | null>(null);
   const pendingCommitRef = useRef("");
   const agentTaskIdRef = useRef(0);
+  const pendingAtQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
     import("node:child_process").then(({ execSync }) => {
@@ -398,7 +401,7 @@ export const App: React.FC<AppProps> = (props) => {
     }
   }
 
-  function filterAtSuggestions(entries: string[], query: string): string[] {
+  function filterAtSuggestions(entries: string[], query: string): AtSuggestion[] {
     const q = query.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
     if (!q) {
       return entries
@@ -407,34 +410,70 @@ export const App: React.FC<AppProps> = (props) => {
           if (da !== db) return da - db;
           return a.localeCompare(b);
         })
-        .slice(0, 10);
+        .slice(0, 10)
+        .map(path => ({ path }));
     }
-    return entries
-      .map(f => {
-        const lower = f.toLowerCase();
-        const base = lower.split("/").pop() ?? lower;
-        let score = -1;
-        if (base === q) score = 1000;
-        else if (base.startsWith(q)) score = 800;
-        else if (base.includes(q)) score = 600;
-        else if (lower.includes(q)) score = 400;
-        else {
-          let qi = 0;
-          for (let i = 0; i < lower.length && qi < q.length; i++) {
-            if (lower[i] === q[qi]) qi++;
-          }
-          if (qi === q.length) score = 200;
+
+    const results: AtSuggestion[] = [];
+    for (const entry of entries) {
+      const lower = entry.toLowerCase();
+      const parts = lower.split("/");
+      const base = parts[parts.length - 1] ?? lower;
+      const depth = parts.length;
+
+      let score = -1;
+      let indices: number[] = [];
+
+      if (base === q) {
+        score = 1000 - depth;
+        indices = Array.from({ length: base.length }, (_, i) => lower.length - base.length + i);
+      } else if (base.startsWith(q)) {
+        score = 800 - depth;
+        indices = Array.from({ length: q.length }, (_, i) => lower.length - base.length + i);
+      } else if (base.includes(q)) {
+        const idx = base.indexOf(q);
+        score = 600 - depth;
+        const offset = lower.length - base.length;
+        indices = Array.from({ length: q.length }, (_, i) => offset + idx + i);
+      } else if (lower.includes(q)) {
+        const idx = lower.indexOf(q);
+        score = 400 - depth;
+        indices = Array.from({ length: q.length }, (_, i) => idx + i);
+      } else {
+        const target = base.includes(q[0] ?? "") ? base : lower;
+        const offset = target === base ? lower.length - base.length : 0;
+        const matchIdx: number[] = [];
+        let qi = 0;
+        for (let i = 0; i < target.length && qi < q.length; i++) {
+          if (target[i] === q[qi]) { matchIdx.push(offset + i); qi++; }
         }
-        score -= f.split("/").length * 2;
-        return { f, score };
+        if (qi === q.length) {
+          score = 200 - depth;
+          indices = matchIdx;
+        }
+      }
+
+      if (score > 0) results.push({ path: entry, indices });
+    }
+
+    return results
+      .sort((a, b) => {
+        const scoreOf = (s: AtSuggestion) => {
+          const lower = s.path.toLowerCase();
+          const base = lower.split("/").pop() ?? lower;
+          const depth = s.path.split("/").length;
+          if (base === q) return 1000 - depth;
+          if (base.startsWith(q)) return 800 - depth;
+          if (base.includes(q)) return 600 - depth;
+          if (lower.includes(q)) return 400 - depth;
+          return 200 - depth;
+        };
+        return scoreOf(b) - scoreOf(a);
       })
-      .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
-      .map(x => x.f);
+      .slice(0, 10);
   }
 
-  async function getAtSuggestions(query: string): Promise<string[]> {
+  async function getAtSuggestions(query: string): Promise<AtSuggestion[]> {
     const entries = await buildFileCache();
     return filterAtSuggestions(entries, query);
   }
@@ -1084,11 +1123,13 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         return;
       }
       if (atSuggestions.length > 0) {
-        const chosen = atSuggestions[atSuggestionIndex];
+        const chosen = atSuggestions[atSuggestionIndex].path;
         const newVal = input.replace(/@([\w./\-]*)$/, `@${chosen}`);
         setInput(newVal);
         if (chosen.endsWith("/")) {
+          pendingAtQueryRef.current = chosen;
           getAtSuggestions(chosen).then(s => {
+            if (pendingAtQueryRef.current !== chosen) return;
             setAtSuggestions(s);
             setAtSuggestionIndex(0);
           });
@@ -1161,11 +1202,15 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
       if (atMatch) {
         const query = atMatch[1];
+        const pendingQuery = query;
+        pendingAtQueryRef.current = pendingQuery;
         getAtSuggestions(query).then(suggestions => {
+          if (pendingAtQueryRef.current !== pendingQuery) return;
           setAtSuggestions(suggestions);
           setAtSuggestionIndex(0);
         });
       } else {
+        pendingAtQueryRef.current = null;
         setAtSuggestions([]);
       }
     }
@@ -1362,43 +1407,61 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       )}
       {!isRunning && (
         <Box flexDirection="column" width={fullWidth}>
-          {gitBranch && (
-            <Box>
-              <Text color="gray" dimColor>{"── "}</Text>
-              <Text color="cyan" dimColor>{gitBranch}</Text>
-              <Text color="gray" dimColor>{" ──"}</Text>
-            </Box>
-          )}
-          <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-            <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
+          <Box>
+            <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 4 : 0) - 1))}</Text>
+            {gitBranch && <Text color="gray" dimColor>{" " + gitBranch + " ─"}</Text>}
+          </Box>
+          <Box paddingX={1}>
+            <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "❯ "}</Text>
             <Text>{input}</Text>
             <Text color="gray">█</Text>
           </Box>
-          {slashCmds.length > 0 && (
+          {input.startsWith("/") && input.length >= 1 && (
             <Box flexDirection="column" paddingX={2}>
               {slashCmds.map((m, i) => (
                 <Text key={m} color={i === slashCmdIndex ? "cyan" : "gray"} dimColor={i !== slashCmdIndex}>
                   {i === slashCmdIndex ? "› " : "  "}{m}
                 </Text>
               ))}
-              <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>
+              {slashCmds.length > 0 && <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>}
             </Box>
           )}
           {atSuggestions.length > 0 && (
             <Box flexDirection="column" paddingX={2}>
-              {atSuggestions.map((f, i) => (
-                <Text key={f} color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
-                  {i === atSuggestionIndex ? "› " : "  "}@{f}
-                </Text>
+              {atSuggestions.map((item, i) => (
+                <Box key={item.path}>
+                  <Text color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
+                    {i === atSuggestionIndex ? "› " : "  "}
+                  </Text>
+                  {item.indices && item.indices.length > 0 ? (
+                    <Text>
+                      {item.path.split("").map((ch, ci) => (
+                        <Text key={ci} color={item.indices!.includes(ci) ? "cyan" : (i === atSuggestionIndex ? "white" : "gray")} bold={item.indices!.includes(ci)}>
+                          {ch}
+                        </Text>
+                      ))}
+                    </Text>
+                  ) : (
+                    <Text color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
+                      {item.path}
+                    </Text>
+                  )}
+                </Box>
               ))}
-              <Text color="gray" dimColor>  Tab to complete · ↑↓ navigate</Text>
+              <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete</Text>
             </Box>
           )}
-          <Box justifyContent="space-between" width={fullWidth}>
-            <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
-            <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>
-              {PERM_MODE_LABELS[permMode]} · shift+tab
-            </Text>
+          <Box>
+            <Box flexGrow={1}>
+              <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (permMode !== "ask" ? PERM_MODE_LABELS[permMode].length + 4 : 0) - 1))}</Text>
+            </Box>
+            {permMode !== "ask" && (
+              <Text color={permMode === "plan" ? "yellow" : "green"} dimColor>{" " + PERM_MODE_LABELS[permMode] + " ─"}</Text>
+            )}
+          </Box>
+          <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
+            <Text color="gray" dimColor>Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
+            <Text color="gray" dimColor>shift+tab · mode</Text>
           </Box>
         </Box>
       )}
