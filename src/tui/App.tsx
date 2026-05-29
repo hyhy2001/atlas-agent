@@ -243,6 +243,7 @@ export const App: React.FC<AppProps> = (props) => {
   const startedAtRef = useRef<number | null>(null);
   const pendingCommitRef = useRef("");
   const agentTaskIdRef = useRef(0);
+  const nestedCallCountRef = useRef(0);
   const pendingAtQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -520,9 +521,21 @@ export const App: React.FC<AppProps> = (props) => {
 
     // Install tool callbacks on executor to capture tool call events when running in Ink mode
     try {
+      nestedCallCountRef.current = 0;
       (props.executor as any)._onToolCall = (name: string, summary: string, nested = false) => {
+        if (nested) {
+          nestedCallCountRef.current++;
+          const n = nestedCallCountRef.current;
+          // Show first 5 nested calls; suppress the rest (done summary shows total)
+          if (n <= 5) {
+            setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
+          } else if (n === 6) {
+            setHistory(h => [...h, { type: "tool_call", text: "…", toolName: "more", nested }]);
+          }
+          return;
+        }
         setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
-        if (!nested) setCurrentToolName(name);
+        setCurrentToolName(name);
       };
       (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean, nested = false) => {
         setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError, nested }]);
@@ -540,6 +553,7 @@ export const App: React.FC<AppProps> = (props) => {
         ));
       };
       (props.executor as any)._onDelegateStart = (agentName: string): string => {
+        nestedCallCountRef.current = 0;
         const id = String(++agentTaskIdRef.current);
         setAgentTasks(tasks => [...tasks, {
           id,
