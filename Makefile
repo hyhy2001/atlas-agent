@@ -145,11 +145,11 @@ install-mcp:
 	  echo "  ✓ Already installed"; \
 	else \
 	  case "$(PLATFORM)-$(ARCH_NAME)" in \
-	    linux-x64)     ASSET="codebase-memory-mcp-linux-x86_64.tar.gz" ;; \
-	    linux-arm64)   ASSET="codebase-memory-mcp-linux-aarch64.tar.gz" ;; \
-	    darwin-arm64)  ASSET="codebase-memory-mcp-macos-aarch64.tar.gz" ;; \
-	    darwin-x64)    ASSET="codebase-memory-mcp-macos-x86_64.tar.gz" ;; \
-	    windows-x64)   ASSET="codebase-memory-mcp-windows-x86_64.zip" ;; \
+	    linux-x64)     ASSET="codebase-memory-mcp-linux-amd64.tar.gz" ;; \
+	    linux-arm64)   ASSET="codebase-memory-mcp-linux-arm64.tar.gz" ;; \
+	    darwin-arm64)  ASSET="codebase-memory-mcp-darwin-arm64.tar.gz" ;; \
+	    darwin-x64)    ASSET="codebase-memory-mcp-darwin-amd64.tar.gz" ;; \
+	    windows-x64)   ASSET="codebase-memory-mcp-windows-amd64.zip" ;; \
 	    *) echo "  Warning: no MCP binary for $(PLATFORM)-$(ARCH_NAME), skipping"; exit 0 ;; \
 	  esac; \
 	  URL="https://github.com/DeusData/codebase-memory-mcp/releases/latest/download/$$ASSET"; \
