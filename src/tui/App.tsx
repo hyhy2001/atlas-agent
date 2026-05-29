@@ -201,6 +201,16 @@ export const App: React.FC<AppProps> = (props) => {
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [statusVerb, setStatusVerb] = useState("Working");
   const [tip, setTip] = useState<string | null>(null);
+  const [termCols, setTermCols] = useState(process.stdout.columns ?? 80);
+
+  useEffect(() => {
+    const onResize = () => setTermCols(process.stdout.columns ?? 80);
+    process.stdout.on("resize", onResize);
+    return () => { process.stdout.off("resize", onResize); };
+  }, []);
+
+  const fullWidth = termCols - 2;
+  const overlayWidth = Math.max(40, termCols - 4);
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
   const [liveTokens, setLiveTokens] = useState(0);
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
@@ -1088,7 +1098,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         )}
       </Static>
       {questionOverlay && (
-        <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={Math.min((process.stdout.columns ?? 80) - 4, 80)}>
+        <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={overlayWidth}>
           <Box marginBottom={1}>
             <Text bold color="cyan">{"? "}</Text>
             <Text bold>{questionOverlay.question}</Text>
@@ -1158,7 +1168,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         </Box>
       )}
       {!isRunning && (
-        <Box flexDirection="column" width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+        <Box flexDirection="column" width={fullWidth}>
           {gitBranch && (
             <Box>
               <Text color="gray" dimColor>{"── "}</Text>
@@ -1190,7 +1200,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
               })()}
             </Box>
           )}
-          <Box justifyContent="space-between" width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+          <Box justifyContent="space-between" width={fullWidth}>
             <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
             <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>
               {PERM_MODE_LABELS[permMode]} · shift+tab
@@ -1199,7 +1209,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         </Box>
       )}
       {!isRunning && (
-        <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+        <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={fullWidth}>
           <Text color="gray">{(() => {
             const parts: string[] = [];
             if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens`);
