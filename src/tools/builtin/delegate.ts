@@ -115,6 +115,7 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
   const leaderOnToolCall = leaderExecutor ? (leaderExecutor as any)._onToolCall : null;
   const leaderOnToolResult = leaderExecutor ? (leaderExecutor as any)._onToolResult : null;
   const leaderOnSubagentDone = leaderExecutor ? (leaderExecutor as any)._onSubagentDone : null;
+  const leaderOnDelegateStart = leaderExecutor ? (leaderExecutor as any)._onDelegateStart : null;
   let toolUseCount = 0;
   if (leaderOnToolCall) {
     (subExecutor as any)._onToolCall = (name: string, summary: string) => {
@@ -126,6 +127,9 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
     (subExecutor as any)._onToolResult = (name: string, result: string, isError: boolean) => {
       leaderOnToolResult(name, result, isError, true);
     };
+  }
+  if (leaderOnDelegateStart) {
+    leaderOnDelegateStart(task.agent);
   }
   const startTime = Date.now();
   let subTokens = 0;

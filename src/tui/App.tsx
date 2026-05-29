@@ -71,6 +71,24 @@ interface OverlayItem {
   value: string;
 }
 
+type PermMode = "ask" | "auto" | "plan";
+const PERM_MODES: PermMode[] = ["ask", "auto", "plan"];
+const PERM_MODE_LABELS: Record<PermMode, string> = {
+  ask: "ask",
+  auto: "auto-approve",
+  plan: "plan only",
+};
+
+interface AgentTask {
+  id: string;
+  agent: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  durationMs?: number;
+  toolUses?: number;
+  tokens?: number;
+}
+
 function formatTokenCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
@@ -152,6 +170,9 @@ export const App: React.FC<AppProps> = (props) => {
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
   const [liveTokens, setLiveTokens] = useState(0);
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
+  const [permMode, setPermMode] = useState<PermMode>("ask");
+  const [gitBranch, setGitBranch] = useState<string>("");
+  const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
   const [questionOverlay, setQuestionOverlay] = useState<{
@@ -171,6 +192,18 @@ export const App: React.FC<AppProps> = (props) => {
   const reasoningModelRef = useRef(process.env["ATLAS_REASONING_MODEL"]);
   const startedAtRef = useRef<number | null>(null);
   const pendingCommitRef = useRef("");
+  const agentTaskIdRef = useRef(0);
+
+  useEffect(() => {
+    import("node:child_process").then(({ execSync }) => {
+      try {
+        const branch = execSync("git branch --show-current 2>/dev/null", { encoding: "utf8" }).trim();
+        setGitBranch(branch);
+      } catch {
+        setGitBranch("");
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!isRunning) { setElapsedSecs(0); return; }
@@ -300,6 +333,7 @@ export const App: React.FC<AppProps> = (props) => {
     setIsRunning(true);
     setLiveTail("");
     setLiveTokens(0);
+    setAgentTasks([]);
     let rawSource = "";
     let committedLen = 0;
 
@@ -318,6 +352,21 @@ export const App: React.FC<AppProps> = (props) => {
         const tokenStr = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
         const text = `Done (${toolUses} tool ${toolUses === 1 ? "use" : "uses"} · ${tokenStr} tokens · ${timeStr})`;
         setHistory(h => [...h, { type: "subagent_done", text, toolName: agentName }]);
+        setAgentTasks(tasks => tasks.map(t =>
+          t.agent === agentName && t.status === "running"
+            ? { ...t, status: "done", durationMs, toolUses, tokens }
+            : t
+        ));
+      };
+      (props.executor as any)._onDelegateStart = (agentName: string): string => {
+        const id = String(++agentTaskIdRef.current);
+        setAgentTasks(tasks => [...tasks, {
+          id,
+          agent: agentName,
+          status: "running",
+          startedAt: Date.now(),
+        }]);
+        return id;
       };
     } catch (e) {}
 
@@ -371,6 +420,7 @@ export const App: React.FC<AppProps> = (props) => {
       (props.executor as any)._onToolCall = undefined;
       (props.executor as any)._onToolResult = undefined;
       (props.executor as any)._onSubagentDone = undefined;
+      (props.executor as any)._onDelegateStart = undefined;
     }
   }
 
@@ -749,6 +799,28 @@ export const App: React.FC<AppProps> = (props) => {
 
     if (isRunning) return;
 
+    // Shift+Tab: cycle permission mode
+    if (key.shift && key.tab) {
+      setPermMode(m => {
+        const idx = PERM_MODES.indexOf(m);
+        const next = PERM_MODES[(idx + 1) % PERM_MODES.length];
+        if (next === "auto") {
+          (props.executor as any)._autoApprove = true;
+        } else {
+          (props.executor as any)._autoApprove = false;
+        }
+        if (next === "plan") {
+          planModeRef.current.enter();
+          setPlanActive(true);
+        } else if (m === "plan") {
+          planModeRef.current.exit();
+          setPlanActive(false);
+        }
+        return next;
+      });
+      return;
+    }
+
     // Tab → accept suggestion
     if (key.tab) {
       if (suggestion) setInput(suggestion);
@@ -891,8 +963,39 @@ export const App: React.FC<AppProps> = (props) => {
           )}
         </Box>
       )}
+      {agentTasks.length > 0 && (
+        <Box flexDirection="column" marginTop={0}>
+          {agentTasks.map(task => (
+            <Box key={task.id}>
+              <Text color={task.status === "running" ? "cyan" : task.status === "done" ? "green" : "red"}>
+                {task.status === "running" ? "◯ " : "● "}
+              </Text>
+              <Text color={task.status === "running" ? "cyan" : "gray"}>
+                {task.agent}
+              </Text>
+              {task.status === "running" && (
+                <Text color="gray" dimColor>
+                  {`  ${formatElapsed(Math.floor((Date.now() - task.startedAt) / 1000))}`}
+                </Text>
+              )}
+              {task.status === "done" && task.durationMs !== undefined && (
+                <Text color="gray" dimColor>
+                  {`  ${formatElapsed(Math.floor(task.durationMs / 1000))} · ${task.toolUses ?? 0} tools`}
+                </Text>
+              )}
+            </Box>
+          ))}
+        </Box>
+      )}
       {!isRunning && (
         <Box flexDirection="column" width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+          {gitBranch && (
+            <Box>
+              <Text color="gray" dimColor>{"── "}</Text>
+              <Text color="cyan" dimColor>{gitBranch}</Text>
+              <Text color="gray" dimColor>{" ──"}</Text>
+            </Box>
+          )}
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
             <Text>{input}</Text>
@@ -917,7 +1020,12 @@ export const App: React.FC<AppProps> = (props) => {
               })()}
             </Box>
           )}
-          <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
+          <Box justifyContent="space-between" width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+            <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
+            <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>
+              {PERM_MODE_LABELS[permMode]} · shift+tab
+            </Text>
+          </Box>
         </Box>
       )}
       {!isRunning && (
