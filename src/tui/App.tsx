@@ -61,9 +61,15 @@ const TIPS = [
 ];
 
 const COMMANDS = [
-  "help", "save", "sessions", "load", "clear", "context", "plan", "execute", "compact", "cost", "stats",
+  "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
   "init", "diff", "undo", "agent", "agents", "model", "doctor", "worktree", "trust", "exit", "quit",
 ];
+
+interface OverlayItem {
+  label: string;
+  sublabel?: string;
+  value: string;
+}
 
 function formatTokenCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -77,6 +83,16 @@ function formatElapsed(secs: number): string {
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
   return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+}
+
+function formatTimeAgo(isoString: string): string {
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const secs = Math.floor((now - then) / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
 }
 
 function formatToolName(name: string): string {
@@ -140,7 +156,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
   const [questionOverlay, setQuestionOverlay] = useState<{
     question: string;
-    options: string[];
+    items: OverlayItem[];
     selectedIndex: number;
     resolve: (answer: string) => void;
   } | null>(null);
@@ -220,7 +236,12 @@ export const App: React.FC<AppProps> = (props) => {
   useEffect(() => {
     (props.executor as any)._askUser = (question: string, options: string[]) => {
       return new Promise<string>((resolve) => {
-        setQuestionOverlay({ question, options, selectedIndex: 0, resolve });
+        setQuestionOverlay({
+          question,
+          items: options.map(o => ({ label: o, value: o })),
+          selectedIndex: 0,
+          resolve,
+        });
       });
     };
     return () => {
@@ -367,6 +388,44 @@ export const App: React.FC<AppProps> = (props) => {
       }
       return true;
     }
+    if (value === "/resume") {
+      const sessions = await listSessions();
+      if (sessions.length === 0) {
+        addSystem("No saved sessions to resume.");
+        return true;
+      }
+      const items = sessions.slice(0, 10).map(s => {
+        const date = s.updatedAt.slice(0, 10);
+        const time = s.updatedAt.slice(11, 16);
+        const ago = formatTimeAgo(s.updatedAt);
+        return {
+          label: `${s.id}`,
+          sublabel: `${date} ${time} (${ago}) · ${s.messageCount} messages`,
+          value: s.id,
+        };
+      });
+      const chosenId = await new Promise<string>((resolve) => {
+        setQuestionOverlay({
+          question: "Resume which session?",
+          items,
+          selectedIndex: 0,
+          resolve,
+        });
+      });
+      if (!chosenId) {
+        addSystem("Resume cancelled.");
+        return true;
+      }
+      const session = await loadSession(chosenId);
+      if (!session) {
+        addSystem(`Session not found: ${chosenId}`);
+        return true;
+      }
+      messagesRef.current = session.messages;
+      sessionIdRef.current = session.id;
+      addSystem(`Resumed session ${chosenId} (${session.messageCount} messages)`);
+      return true;
+    }
     if (value === "/clear") {
       messagesRef.current = [];
       sessionIdRef.current = generateSessionId();
@@ -414,7 +473,7 @@ export const App: React.FC<AppProps> = (props) => {
       return true;
     }
     if (value === "/help") {
-      addSystem(`Commands:\n  /save /sessions /load <id> /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
+      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
       return true;
     }
     if (value === "/agents") {
@@ -611,21 +670,27 @@ export const App: React.FC<AppProps> = (props) => {
         return;
       }
       if (key.downArrow) {
-        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.min(o.options.length - 1, o.selectedIndex + 1) } : o);
+        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.min(o.items.length - 1, o.selectedIndex + 1) } : o);
         return;
       }
       if (key.return) {
         const overlay = questionOverlay;
         setQuestionOverlay(null);
-        overlay.resolve(overlay.options[overlay.selectedIndex]);
+        overlay.resolve(overlay.items[overlay.selectedIndex].value);
+        return;
+      }
+      if (key.escape) {
+        const overlay = questionOverlay;
+        setQuestionOverlay(null);
+        overlay.resolve("");
         return;
       }
       if (inputChar >= "1" && inputChar <= "4") {
         const idx = parseInt(inputChar) - 1;
-        if (idx < questionOverlay.options.length) {
+        if (idx < questionOverlay.items.length) {
           const overlay = questionOverlay;
           setQuestionOverlay(null);
-          overlay.resolve(overlay.options[idx]);
+          overlay.resolve(overlay.items[idx].value);
           return;
         }
       }
@@ -773,18 +838,25 @@ export const App: React.FC<AppProps> = (props) => {
             <Text bold color="cyan">{"? "}</Text>
             <Text bold>{questionOverlay.question}</Text>
           </Box>
-          {questionOverlay.options.map((opt, i) => (
-            <Box key={i}>
-              <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"}>
-                {i === questionOverlay.selectedIndex ? "❯ " : "  "}
-              </Text>
-              <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"} bold={i === questionOverlay.selectedIndex}>
-                {opt}
-              </Text>
+          {questionOverlay.items.map((item, i) => (
+            <Box key={i} flexDirection="column">
+              <Box>
+                <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"}>
+                  {i === questionOverlay.selectedIndex ? "❯ " : "  "}
+                </Text>
+                <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"} bold={i === questionOverlay.selectedIndex}>
+                  {item.label}
+                </Text>
+              </Box>
+              {item.sublabel && (
+                <Box paddingLeft={2}>
+                  <Text color="gray" dimColor>{item.sublabel}</Text>
+                </Box>
+              )}
             </Box>
           ))}
           <Box marginTop={1}>
-            <Text color="gray" dimColor>↑↓ navigate  ↵ select  1-4 quick pick</Text>
+            <Text color="gray" dimColor>↑↓ navigate  ↵ select{questionOverlay.items.length <= 4 ? "  1-4 quick pick" : ""}  Esc cancel</Text>
           </Box>
         </Box>
       )}
@@ -818,7 +890,7 @@ export const App: React.FC<AppProps> = (props) => {
             <Box flexDirection="column" paddingX={2}>
               {(() => {
                 const allCmds = [
-                  "/help","/save","/sessions","/load","/clear","/context",
+                  "/help","/save","/sessions","/load","/resume","/clear","/context",
                   "/plan","/execute","/compact","/cost","/stats","/init",
                   "/diff","/undo","/agent","/agents","/model","/doctor",
                   "/worktree","/trust",
