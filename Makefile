@@ -220,6 +220,8 @@ build-mcp:
 	@rm -rf $(DEPS_DIR)/cbm-source
 	@echo "  Cloning source..."
 	@git clone --depth=1 https://github.com/DeusData/codebase-memory-mcp.git $(DEPS_DIR)/cbm-source 2>&1 | tail -3
+	@echo "  Patching linker flags (+ -ldl for older glibc)..."
+	@sed -i 's/^LDFLAGS = -lm -lstdc++ -lpthread -lz/LDFLAGS = -lm -lstdc++ -lpthread -lz -ldl/' $(DEPS_DIR)/cbm-source/Makefile.cbm
 	@echo "  Building (~3-5 minutes — compiling 155 tree-sitter grammars)..."
 	@cd $(DEPS_DIR)/cbm-source && bash scripts/build.sh 2>&1 | tail -5
 	@if [ ! -f "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" ]; then \
