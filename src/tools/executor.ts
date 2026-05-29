@@ -10,33 +10,31 @@ function getToolSummary(name: string, input: unknown): string {
   const inp = input as Record<string, unknown>;
   switch (name) {
     case "bash":
-      return `bash: ${(inp.command as string)?.slice(0, 60) ?? ""}`;
+      return (inp.command as string)?.slice(0, 80) ?? "";
     case "read_file":
-      return `read: ${inp.path ?? ""}`;
     case "write_file":
-      return `write: ${inp.path ?? ""}`;
     case "edit_file":
-      return `edit: ${inp.path ?? ""}`;
+      return String(inp.path ?? "");
     case "grep":
-      return `grep: ${inp.pattern ?? ""}`;
+      return `${inp.pattern ?? ""}${inp.path ? ` in ${inp.path}` : ""}`;
     case "glob":
-      return `glob: ${inp.pattern ?? ""}`;
+      return String(inp.pattern ?? "");
     case "git_status":
-      return "git status";
+      return "";
     case "git_diff":
-      return `git diff${inp.path ? `: ${inp.path}` : ""}`;
+      return inp.path ? String(inp.path) : "";
     case "git_log":
-      return "git log";
+      return "";
     case "git_commit":
-      return `git commit: ${(inp.message as string)?.slice(0, 40) ?? ""}`;
+      return (inp.message as string)?.slice(0, 60) ?? "";
     case "list_directory":
-      return `ls: ${inp.path ?? "."}`;
+      return String(inp.path ?? ".");
     case "web_fetch":
-      return `fetch: ${(inp.url as string)?.slice(0, 50) ?? ""}`;
+      return (inp.url as string)?.slice(0, 60) ?? "";
     case "delegate":
-      return `delegate → ${inp.agent ?? ""}`;
+      return String(inp.agent ?? "");
     default:
-      return name;
+      return "";
   }
 }
 

@@ -62,6 +62,43 @@ function formatElapsed(secs: number): string {
   return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
 }
 
+function formatToolName(name: string): string {
+  const map: Record<string, string> = {
+    bash: "Bash",
+    read_file: "Read",
+    write_file: "Write",
+    edit_file: "Edit",
+    grep: "Grep",
+    glob: "Glob",
+    list_directory: "LS",
+    web_fetch: "Fetch",
+    git_status: "Git",
+    git_diff: "Git",
+    git_log: "Git",
+    git_commit: "Git",
+    delegate: "Delegate",
+    delegate_parallel: "Delegate",
+    apply_patch: "Patch",
+    read_many_files: "Read",
+    todo_write: "Todo",
+    todo_read: "Todo",
+    memory_save: "Memory",
+    memory_read: "Memory",
+    memory_append: "Memory",
+    analyze_log: "Log",
+  };
+  return map[name] ?? name.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join("");
+}
+
+function formatToolResult(text: string, maxLines = 5): { preview: string; hidden: number } {
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return { preview: text, hidden: 0 };
+  return {
+    preview: lines.slice(0, maxLines).join("\n"),
+    hidden: lines.length - maxLines,
+  };
+}
+
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
@@ -579,18 +616,30 @@ export const App: React.FC<AppProps> = (props) => {
             )}
             {entry.type === "tool_call" && (
               <Box>
-                <Text color="gray" dimColor>{"  ↳ "}</Text>
-                <Text color="cyan">{entry.toolName ?? "tool"}</Text>
-                {entry.text && <Text color="gray" dimColor>{": " + entry.text}</Text>}
+                <Text color={entry.isError ? "red" : "green"}>{"● "}</Text>
+                <Text bold>{formatToolName(entry.toolName ?? "tool")}</Text>
+                {entry.text && <Text color="gray" dimColor>{"(" + entry.text + ")"}</Text>}
               </Box>
             )}
-            {entry.type === "tool_result" && (
-              <Box paddingLeft={4}>
-                <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>
-                  {entry.text.slice(0, 200)}{entry.text.length > 200 ? "…" : ""}
-                </Text>
-              </Box>
-            )}
+            {entry.type === "tool_result" && (() => {
+              const { preview, hidden } = formatToolResult(entry.text);
+              const lines = preview.split("\n");
+              return (
+                <Box flexDirection="column" paddingLeft={2}>
+                  {lines.map((line, i) => (
+                    <Box key={i}>
+                      <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
+                      <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>{line}</Text>
+                    </Box>
+                  ))}
+                  {hidden > 0 && (
+                    <Box>
+                      <Text color="gray" dimColor>{"   … (" + hidden + " more lines)"}</Text>
+                    </Box>
+                  )}
+                </Box>
+              );
+            })()}
             {entry.type === "system" && (
               <Text color="cyan" dimColor>{entry.text}</Text>
             )}
@@ -605,7 +654,7 @@ export const App: React.FC<AppProps> = (props) => {
       {isRunning && (
         <Box>
           <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
-          <Text color="gray"> Working · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${currentToolName}` : ""} · esc to interrupt</Text>
+          <Text color="gray"> Working · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
         </Box>
       )}
       {!isRunning && (
