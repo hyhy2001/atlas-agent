@@ -33,9 +33,10 @@ function printBanner(leaderTools: number, totalTools: number, model: string): vo
 
   const leftLines = [
     "",
-    c("      ▐▛███▜▌"),
-    c("     ▝▜█████▛▘"),
-    c("       ▘▘ ▝▝"),
+    c("      ▀▀▀▀▀"),
+    c("      █ ▀ █"),
+    c("      █▀▀▀█"),
+    c("      █   █"),
     "",
     w(`${model} • ${leaderTools}/${totalTools} tools`),
     dim(cwd.length > leftW - 4 ? "~/" + cwd.split("/").slice(-2).join("/") : cwd),
