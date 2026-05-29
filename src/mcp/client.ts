@@ -81,6 +81,16 @@ export class McpClient {
         env,
       });
 
+      // Capture stderr so we can surface the real reason on failure
+      let stderrBuf = "";
+      const stderrStream = (transport as any).stderr;
+      if (stderrStream && typeof stderrStream.on === "function") {
+        stderrStream.on("data", (d: Buffer) => {
+          stderrBuf += d.toString();
+          if (stderrBuf.length > 4000) stderrBuf = stderrBuf.slice(-4000);
+        });
+      }
+
       const client = new Client({
         name: "atlas-agent",
         version: "0.1.0",
@@ -88,10 +98,20 @@ export class McpClient {
 
       const connectPromise = client.connect(transport);
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Connection timeout")), 5000)
+        setTimeout(() => reject(new Error("Connection timeout (5s)")), 5000)
       );
 
-      await Promise.race([connectPromise, timeoutPromise]);
+      try {
+        await Promise.race([connectPromise, timeoutPromise]);
+      } catch (connErr) {
+        const cmsg = connErr instanceof Error ? connErr.message : String(connErr);
+        const detail = stderrBuf.trim();
+        console.warn(`MCP server "${config.name}" failed to connect: ${cmsg}`);
+        if (detail) {
+          console.warn(`  ${config.name} stderr: ${detail.split("\n").slice(-3).join(" | ")}`);
+        }
+        return null;
+      }
 
       const mcpClient = new McpClient(client, transport, config);
 
