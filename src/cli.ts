@@ -177,10 +177,32 @@ async function main() {
     initialSession = session;
   }
 
+  const resolvedBaseURL = baseURLOverride || config.baseURL;
+
+  // Validate base URL before handing it to the SDK so we can show a clear message
+  if (!resolvedBaseURL) {
+    console.error("\nError: No API base URL configured.\n");
+    console.error("Set it via environment variable:");
+    console.error("  export ATLAS_BASE_URL=\"http://your-proxy:port/v1\"");
+    console.error("  export ATLAS_AUTH_TOKEN=\"your-token\"\n");
+    console.error("Or run the CLI without env vars to use the login prompt.\n");
+    process.exit(1);
+  }
+  try {
+    // eslint-disable-next-line no-new
+    new URL(resolvedBaseURL);
+  } catch {
+    console.error(`\nError: ATLAS_BASE_URL is not a valid URL: "${resolvedBaseURL}"\n`);
+    console.error("Expected format: http://host:port/v1  (or https://...)\n");
+    console.error("Check your environment:");
+    console.error("  echo $ATLAS_BASE_URL\n");
+    process.exit(1);
+  }
+
   const provider = new OpenAIProvider({
     apiKey,
     model: config.model,
-    baseURL: baseURLOverride || config.baseURL,
+    baseURL: resolvedBaseURL,
   });
 
   const mcpClients: McpClient[] = [];
@@ -303,6 +325,34 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  // Walk the error cause chain (OpenAI SDK wraps fetch errors)
+  let chain = msg;
+  let cur: any = err;
+  while (cur?.cause) {
+    cur = cur.cause;
+    if (cur instanceof Error) chain += " | " + cur.message;
+    if ((cur as any)?.code) chain += " | code=" + (cur as any).code;
+  }
+  // Friendly messages for common connection / config errors
+  if (chain.includes("cannot be parsed as a URL")) {
+    console.error("\nError: API base URL is invalid.\n");
+    console.error("Check ATLAS_BASE_URL — expected format: http://host:port/v1\n");
+  } else if (chain.includes("ECONNREFUSED")) {
+    console.error("\nError: Cannot reach the API endpoint (connection refused).\n");
+    console.error("The proxy/server isn't running, or the host:port is wrong.");
+    console.error(`  ATLAS_BASE_URL=${process.env["ATLAS_BASE_URL"] ?? "(not set)"}\n`);
+  } else if (chain.includes("ENOTFOUND") || chain.includes("EAI_AGAIN")) {
+    console.error("\nError: DNS lookup failed for the API host.\n");
+    console.error(`  ATLAS_BASE_URL=${process.env["ATLAS_BASE_URL"] ?? "(not set)"}\n`);
+  } else if (chain.includes("ETIMEDOUT") || chain.includes("ECONNRESET")) {
+    console.error("\nError: API request timed out or connection was reset.\n");
+    console.error("Check network or try again. Server may be slow/overloaded.\n");
+  } else if (chain.includes("401") || chain.includes("Unauthorized")) {
+    console.error("\nError: API auth failed (401 Unauthorized).\n");
+    console.error("Check ATLAS_AUTH_TOKEN — token may be expired or invalid.\n");
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });
