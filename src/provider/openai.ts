@@ -76,6 +76,14 @@ export class OpenAIProvider {
         yield { type: "text", text: delta.content };
       }
 
+      // Reasoning content (gpt-5-thinking, deepseek-r1, claude via Databricks)
+      if ((delta as any).reasoning_content) {
+        yield { type: "reasoning", text: (delta as any).reasoning_content };
+      }
+      if ((delta as any).reasoning) {
+        yield { type: "reasoning", text: (delta as any).reasoning };
+      }
+
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
           if (tc.function?.name) {

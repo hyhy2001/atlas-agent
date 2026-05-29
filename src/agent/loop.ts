@@ -18,8 +18,9 @@ export async function runAgentLoop(params: {
   abortSignal: AbortSignal;
   onText?: (text: string) => void;
   onTokens?: (deltaTokens: number) => void;
+  onReasoning?: (text: string) => void;
 }): Promise<LoopResult> {
-  const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal, onText, onTokens } = params;
+  const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal, onText, onTokens, onReasoning } = params;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
@@ -43,6 +44,8 @@ export async function runAgentLoop(params: {
         }
         assistantContent += delta.text;
         if (onTokens) onTokens(Math.ceil(delta.text.length / 4));
+      } else if (delta.type === "reasoning" && delta.text) {
+        if (onReasoning) onReasoning(delta.text);
       } else if (delta.type === "tool_call_start") {
         if (currentToolCall) {
           toolCalls.push({

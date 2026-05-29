@@ -34,7 +34,7 @@ export interface ToolResult {
 }
 
 export interface StreamDelta {
-  type: "text" | "tool_call_start" | "tool_call_delta" | "done" | "usage";
+  type: "text" | "reasoning" | "tool_call_start" | "tool_call_delta" | "done" | "usage";
   text?: string;
   toolCallId?: string;
   toolCallName?: string;

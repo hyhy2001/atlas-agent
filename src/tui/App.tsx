@@ -201,6 +201,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [statusVerb, setStatusVerb] = useState("Working");
   const [tip, setTip] = useState<string | null>(null);
+  const [reasoningPreview, setReasoningPreview] = useState("");
   const [termCols, setTermCols] = useState(process.stdout.columns ?? 80);
 
   useEffect(() => {
@@ -341,7 +342,7 @@ export const App: React.FC<AppProps> = (props) => {
     if (!input.startsWith("/") || input.length < 1) return [];
     const allCmds = [
       "/help","/save","/sessions","/load","/resume","/clear","/context",
-      "/plan","/execute","/compact","/cost","/stats","/init",
+      "/plan","/execute","/compact","/cost","/stats","/init","/bg",
       "/diff","/undo","/agent","/agents","/model","/doctor",
       "/worktree","/trust",
       ...(props.commands ?? []).map(c => `/${c.name}`),
@@ -406,6 +407,7 @@ export const App: React.FC<AppProps> = (props) => {
     setIsRunning(true);
     setLiveTail("");
     setLiveTokens(0);
+    setReasoningPreview("");
     setAgentTasks([]);
     let rawSource = "";
     let committedLen = 0;
@@ -465,6 +467,15 @@ export const App: React.FC<AppProps> = (props) => {
         onTokens: (deltaTokens: number) => {
           setLiveTokens(t => t + deltaTokens);
         },
+        onReasoning: (text: string) => {
+          const match = text.match(/\*\*([^*]+)\*\*/);
+          if (match) {
+            setReasoningPreview(match[1].trim());
+          } else {
+            const line = text.split("\n").find(l => l.trim()) ?? "";
+            setReasoningPreview(line.trim().slice(0, 60));
+          }
+        },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
       // Flush any batched complete lines first, then commit remaining tail
@@ -476,6 +487,7 @@ export const App: React.FC<AppProps> = (props) => {
         setHistory(h => [...h, { type: "assistant", text: finalText.replace(/\n$/, "") }]);
       }
       setLiveTail("");
+      setReasoningPreview("");
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
@@ -619,7 +631,7 @@ export const App: React.FC<AppProps> = (props) => {
       return true;
     }
     if (value === "/help") {
-      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
+      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /bg [list|<cmd>|kill <id>|log <id>] : background bash jobs\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
       return true;
     }
     if (value === "/agents") {
@@ -724,6 +736,39 @@ Create a concise ATLAS.md (under 150 lines) with these sections:
 6. **Conventions** — important patterns, constraints, or rules
 
 Write the file using write_file tool to ATLAS.md in the current directory.`);
+      return true;
+    }
+    if (value === "/bg" || value.startsWith("/bg ")) {
+      const arg = value.slice(3).trim();
+      const { startJob, listJobs, getJob, killJob, formatJob } = await import("./background.js");
+
+      if (!arg || arg === "list") {
+        const jobs = listJobs();
+        if (jobs.length === 0) {
+          addSystem("No background jobs.");
+        } else {
+          addSystem("Background jobs:\n" + jobs.map(formatJob).join("\n"));
+        }
+        return true;
+      }
+      if (arg.startsWith("kill ")) {
+        const id = arg.slice(5).trim();
+        addSystem(killJob(id) ? `Killed job ${id}` : `Job ${id} not found or already finished`);
+        return true;
+      }
+      if (arg.startsWith("log ")) {
+        const id = arg.slice(4).trim();
+        const job = getJob(id);
+        if (!job) {
+          addSystem(`Job ${id} not found`);
+        } else {
+          const out = job.output.length > 4000 ? job.output.slice(-4000) + "\n[...output truncated to last 4000 chars]" : job.output;
+          addSystem(`[${id}] ${job.command}\n${formatJob(job)}\n\n${out || "(no output yet)"}`);
+        }
+        return true;
+      }
+      const job = startJob(arg, process.cwd());
+      addSystem(`Started background job [${job.id}]: ${arg}\nUse "/bg log ${job.id}" to view output, "/bg kill ${job.id}" to stop.`);
       return true;
     }
     if (value === "/diff" || value.startsWith("/diff ")) {
@@ -1223,6 +1268,11 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
             <Text color="gray"> {statusVerb} · {formatElapsed(elapsedSecs)}{liveTokens > 0 ? ` · ↓ ${formatTokenCount(liveTokens)} tokens` : ""}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
           </Box>
+          {reasoningPreview && (
+            <Box paddingLeft={2}>
+              <Text color="magenta" dimColor>{"💭 " + reasoningPreview}</Text>
+            </Box>
+          )}
           {tip && (
             <Box>
               <Text color="gray" dimColor>  Tip: {tip}</Text>
