@@ -172,10 +172,10 @@ export const App: React.FC<AppProps> = (props) => {
         },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
+      setStreamBuffer("");
       if (streamedText.trim()) {
         setHistory(h => [...h, { type: "assistant", text: streamedText }]);
       }
-      setStreamBuffer("");
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
