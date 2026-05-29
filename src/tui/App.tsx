@@ -138,6 +138,12 @@ export const App: React.FC<AppProps> = (props) => {
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
+  const [questionOverlay, setQuestionOverlay] = useState<{
+    question: string;
+    options: string[];
+    selectedIndex: number;
+    resolve: (answer: string) => void;
+  } | null>(null);
   const messagesRef = useRef<MessageParam[]>(props.initialSession?.messages ?? []);
   const sessionIdRef = useRef(props.initialSession?.id ?? generateSessionId());
   const sessionCreatedAtRef = useRef(props.initialSession?.createdAt ?? new Date().toISOString());
@@ -210,6 +216,17 @@ export const App: React.FC<AppProps> = (props) => {
       recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "session_end", data: { messageCount: messagesRef.current.length } }).catch(() => {});
     };
   }, []);
+
+  useEffect(() => {
+    (props.executor as any)._askUser = (question: string, options: string[]) => {
+      return new Promise<string>((resolve) => {
+        setQuestionOverlay({ question, options, selectedIndex: 0, resolve });
+      });
+    };
+    return () => {
+      (props.executor as any)._askUser = undefined;
+    };
+  }, [props.executor]);
 
   const allCommandNames = [...COMMANDS, ...(props.commands ?? []).map(c => c.name)];
   const subagentNames = ["atlas-swift", "atlas-forge", "atlas-deep", ...(props.subagents ?? []).map(s => s.name)];
@@ -588,6 +605,33 @@ export const App: React.FC<AppProps> = (props) => {
   };
 
   useInput((inputChar, key) => {
+    if (questionOverlay) {
+      if (key.upArrow) {
+        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.max(0, o.selectedIndex - 1) } : o);
+        return;
+      }
+      if (key.downArrow) {
+        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.min(o.options.length - 1, o.selectedIndex + 1) } : o);
+        return;
+      }
+      if (key.return) {
+        const overlay = questionOverlay;
+        setQuestionOverlay(null);
+        overlay.resolve(overlay.options[overlay.selectedIndex]);
+        return;
+      }
+      if (inputChar >= "1" && inputChar <= "4") {
+        const idx = parseInt(inputChar) - 1;
+        if (idx < questionOverlay.options.length) {
+          const overlay = questionOverlay;
+          setQuestionOverlay(null);
+          overlay.resolve(overlay.options[idx]);
+          return;
+        }
+      }
+      return;
+    }
+
     // Ctrl+O: expand most recent truncated tool result
     if (key.ctrl && inputChar === "o") {
       setHistory(h => {
@@ -723,6 +767,27 @@ export const App: React.FC<AppProps> = (props) => {
           </Box>
         )}
       </Static>
+      {questionOverlay && (
+        <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={Math.min((process.stdout.columns ?? 80) - 4, 80)}>
+          <Box marginBottom={1}>
+            <Text bold color="cyan">{"? "}</Text>
+            <Text bold>{questionOverlay.question}</Text>
+          </Box>
+          {questionOverlay.options.map((opt, i) => (
+            <Box key={i}>
+              <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"}>
+                {i === questionOverlay.selectedIndex ? "❯ " : "  "}
+              </Text>
+              <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"} bold={i === questionOverlay.selectedIndex}>
+                {opt}
+              </Text>
+            </Box>
+          ))}
+          <Box marginTop={1}>
+            <Text color="gray" dimColor>↑↓ navigate  ↵ select  1-4 quick pick</Text>
+          </Box>
+        </Box>
+      )}
       {liveTail && (
         <Box>
           <Text>{liveTail}</Text>

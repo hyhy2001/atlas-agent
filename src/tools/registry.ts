@@ -51,6 +51,7 @@ export class ToolRegistry {
       "memory_save",
       "memory_append",
       "memory_read",
+      "ask_user_question",
     ]);
     for (const tool of this.getAll()) {
       if (leaderTools.has(tool.name)) {
