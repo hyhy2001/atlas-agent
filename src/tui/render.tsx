@@ -54,7 +54,7 @@ function buildBanner(leaderTools: number, totalTools: number, model: string): st
 
   const maxLines = Math.max(leftLines.length, rightLines.length);
   const topBorder = `╭─── ${c(title)} ${"─".repeat(Math.max(0, width - title.length - 6))}╮`;
-  const botBorder = `╰${"─".repeat(width)}╯`;
+  const botBorder = `╰${"─".repeat(width - 1)}╯`;
   const lines = ["", topBorder];
 
   for (let i = 0; i < maxLines; i++) {
