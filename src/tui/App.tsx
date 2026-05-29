@@ -37,7 +37,7 @@ interface AppProps {
 }
 
 interface HistoryEntry {
-  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full";
+  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full" | "subagent_done";
   text: string;
   fullText?: string;
   toolName?: string;
@@ -312,6 +312,13 @@ export const App: React.FC<AppProps> = (props) => {
       (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean, nested = false) => {
         setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError, nested }]);
       };
+      (props.executor as any)._onSubagentDone = (agentName: string, toolUses: number, tokens: number, durationMs: number) => {
+        const seconds = Math.floor(durationMs / 1000);
+        const timeStr = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+        const tokenStr = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
+        const text = `Done (${toolUses} tool ${toolUses === 1 ? "use" : "uses"} · ${tokenStr} tokens · ${timeStr})`;
+        setHistory(h => [...h, { type: "subagent_done", text, toolName: agentName }]);
+      };
     } catch (e) {}
 
     try {
@@ -363,6 +370,7 @@ export const App: React.FC<AppProps> = (props) => {
       runningControllerRef.current = null;
       (props.executor as any)._onToolCall = undefined;
       (props.executor as any)._onToolResult = undefined;
+      (props.executor as any)._onSubagentDone = undefined;
     }
   }
 
@@ -824,6 +832,11 @@ export const App: React.FC<AppProps> = (props) => {
                     <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>{line}</Text>
                   </Box>
                 ))}
+              </Box>
+            )}
+            {entry.type === "subagent_done" && (
+              <Box paddingLeft={2}>
+                <Text color="gray" dimColor>{"  ⎿  " + entry.text}</Text>
               </Box>
             )}
             {entry.type === "system" && (

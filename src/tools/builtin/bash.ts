@@ -3,6 +3,7 @@ import { loadExecPolicy, checkCommand } from "../../execpolicy.js";
 import { wrapCommand } from "../../sandbox.js";
 import { resolve } from "node:path";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
+import { detectDestructive } from "./bash_safety.js";
 
 const MAX_OUTPUT = 50000;
 
@@ -29,6 +30,20 @@ export const bashTool: ToolDefinition = {
     const check = checkCommand(command, policy);
     if (!check.allowed) {
       return { toolUseId: "", content: check.reason ?? "Command blocked by execpolicy", isError: true };
+    }
+
+    const destructive = detectDestructive(command);
+    if (destructive.destructive) {
+      const askUser = (ctx as any)._askUser as ((q: string, opts: string[]) => Promise<string>) | undefined;
+      if (askUser) {
+        const answer = await askUser(
+          `Run potentially destructive command? (${destructive.reason})\n${command.slice(0, 200)}`,
+          ["Yes, run it", "No, cancel"]
+        );
+        if (answer !== "Yes, run it") {
+          return { toolUseId: "", content: "User cancelled destructive command", isError: true };
+        }
+      }
     }
 
     const sandboxedCommand = wrapCommand(command, { timeout: timeout ?? 30 });

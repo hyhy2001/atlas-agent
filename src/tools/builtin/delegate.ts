@@ -114,8 +114,11 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
   const leaderExecutor = (ctx as any)._executor;
   const leaderOnToolCall = leaderExecutor ? (leaderExecutor as any)._onToolCall : null;
   const leaderOnToolResult = leaderExecutor ? (leaderExecutor as any)._onToolResult : null;
+  const leaderOnSubagentDone = leaderExecutor ? (leaderExecutor as any)._onSubagentDone : null;
+  let toolUseCount = 0;
   if (leaderOnToolCall) {
     (subExecutor as any)._onToolCall = (name: string, summary: string) => {
+      toolUseCount++;
       leaderOnToolCall(name, summary, true);
     };
   }
@@ -124,6 +127,8 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
       leaderOnToolResult(name, result, isError, true);
     };
   }
+  const startTime = Date.now();
+  let subTokens = 0;
 
   try {
     await runAgentLoop({
@@ -134,7 +139,14 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
       systemPrompt,
       abortSignal: ctx.abortSignal,
       onText: () => {},
+      onTokens: (deltaTokens: number) => {
+        subTokens += deltaTokens;
+      },
     });
+    if (leaderOnSubagentDone) {
+      const duration = Date.now() - startTime;
+      leaderOnSubagentDone(task.agent, toolUseCount, subTokens, duration);
+    }
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
   }
