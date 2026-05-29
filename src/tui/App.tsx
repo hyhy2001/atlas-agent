@@ -504,17 +504,6 @@ export const App: React.FC<AppProps> = (props) => {
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color="cyan"> █████╗ ████████╗██╗      █████╗ ███████╗</Text>
-        <Text bold color="cyan">██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝</Text>
-        <Text bold color="cyan">███████║   ██║   ██║     ███████║███████╗</Text>
-        <Text bold color="cyan">██╔══██║   ██║   ██║     ██╔══██║╚════██║</Text>
-        <Text bold color="cyan">██║  ██║   ██║   ███████╗██║  ██║███████║</Text>
-        <Text bold color="cyan">╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝</Text>
-        <Text color="gray">  AI Coding Assistant • v1.0.0 • {leaderTools} leader / {totalTools} total tools</Text>
-        <Text color="gray">  Model: {model}</Text>
-        <Text color="gray">  Type /help for commands, "exit" to quit</Text>
-      </Box>
       <Static items={history}>
         {(entry, index) => (
           <Box key={index} flexDirection="column" marginBottom={1}>
