@@ -30,7 +30,40 @@ export class McpClient {
 
   static async create(config: McpServerConfig): Promise<McpClient | null> {
     try {
-      const resolved = await which(config.command).catch(() => null);
+      // Resolve command path:
+      //   - Absolute path → use as-is if exists & executable
+      //   - Relative (./...) → try cwd, then walk up looking for .atlas/
+      //   - Bare name → use which() to look up in PATH
+      let resolved: string | null = null;
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+
+      const isExec = (p: string): boolean => {
+        try {
+          fs.accessSync(p, fs.constants.X_OK);
+          return true;
+        } catch { return false; }
+      };
+
+      if (config.command.startsWith("/")) {
+        if (isExec(config.command)) resolved = config.command;
+      } else if (config.command.startsWith("./") || config.command.startsWith("../")) {
+        // Try cwd first, then walk up looking for matching path
+        const tryPaths = [path.resolve(process.cwd(), config.command)];
+        let dir = process.cwd();
+        for (let i = 0; i < 6; i++) {
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+          tryPaths.push(path.resolve(dir, config.command));
+        }
+        for (const p of tryPaths) {
+          if (isExec(p)) { resolved = p; break; }
+        }
+      } else {
+        resolved = await which(config.command).catch(() => null);
+      }
+
       if (!resolved) {
         console.warn(`MCP server "${config.name}": command "${config.command}" not found, skipping`);
         return null;
@@ -42,7 +75,7 @@ export class McpClient {
           : undefined;
 
       const transport = new StdioClientTransport({
-        command: config.command,
+        command: resolved,
         args: config.args,
         stderr: "pipe",
         env,
