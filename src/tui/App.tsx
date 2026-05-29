@@ -1216,8 +1216,8 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
             <Text>{input}</Text>
-            <Text color="gray">█</Text>
             {suggestion && <Text color="gray" dimColor>{suggestion.slice(input.length)}</Text>}
+            <Text color="gray">█</Text>
           </Box>
           {input.startsWith("/") && input.length >= 1 && (
             <Box flexDirection="column" paddingX={2}>
