@@ -171,6 +171,7 @@ export const App: React.FC<AppProps> = (props) => {
           flushBuffer();
         },
       });
+      if (pendingFlush) { clearTimeout(pendingFlush); pendingFlush = null; }
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
       setStreamBuffer("");
       if (streamedText.trim()) {
