@@ -134,6 +134,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [statusVerb, setStatusVerb] = useState("Working");
   const [tip, setTip] = useState<string | null>(null);
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
+  const [liveTokens, setLiveTokens] = useState(0);
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
@@ -260,6 +261,7 @@ export const App: React.FC<AppProps> = (props) => {
     runningControllerRef.current = controller;
     setIsRunning(true);
     setLiveTail("");
+    setLiveTokens(0);
     let rawSource = "";
     let committedLen = 0;
 
@@ -292,6 +294,9 @@ export const App: React.FC<AppProps> = (props) => {
             pendingCommitRef.current += newComplete;
           }
           setLiveTail(rawSource.slice(committedLen));
+        },
+        onTokens: (deltaTokens: number) => {
+          setLiveTokens(t => t + deltaTokens);
         },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
@@ -727,7 +732,7 @@ export const App: React.FC<AppProps> = (props) => {
         <Box flexDirection="column">
           <Box>
             <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
-            <Text color="gray"> {statusVerb} · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
+            <Text color="gray"> {statusVerb} · {formatElapsed(elapsedSecs)}{liveTokens > 0 ? ` · ↓ ${formatTokenCount(liveTokens)} tokens` : ""}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
           </Box>
           {tip && (
             <Box>
