@@ -4,6 +4,7 @@ import type { ToolRegistry } from "./registry.js";
 import { askPermission } from "../permissions/prompt.js";
 import type { HooksConfig } from "../hooks.js";
 import { matchHooks, buildHookEnv, runHook } from "../hooks.js";
+import { isTrustedPath } from "../trust.js";
 
 function getToolSummary(name: string, input: unknown): string {
   const inp = input as Record<string, unknown>;
@@ -165,12 +166,19 @@ export class ToolExecutor {
         }
       }
 
-      const decision = await askPermission(block.name, details);
-      if (decision === "no") {
-        return { toolUseId: block.id, content: "User denied permission", isError: true };
-      }
-      if (decision === "always") {
-        this.ctx.permissions.grant(block.name);
+      // Check trusted directories to skip permission prompt
+      const trustedDirs = (this.ctx as any)._trustedDirs ?? [];
+      const toolPath = (block.input as any)?.path;
+      if (toolPath && isTrustedPath(toolPath, trustedDirs, this.ctx.workingDir)) {
+        // Skip permission prompt — trusted directory
+      } else {
+        const decision = await askPermission(block.name, details);
+        if (decision === "no") {
+          return { toolUseId: block.id, content: "User denied permission", isError: true };
+        }
+        if (decision === "always") {
+          this.ctx.permissions.grant(block.name);
+        }
       }
     }
 

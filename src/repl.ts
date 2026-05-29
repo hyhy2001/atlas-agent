@@ -71,7 +71,7 @@ export async function startRepl(params: {
   const allCommandNames = [
     "save", "sessions", "load", "clear", "help", "context",
     "plan", "execute", "compact", "cost", "stats", "init", "diff", "undo",
-    "agent", "agents", "model", "doctor", "worktree",
+    "agent", "agents", "model", "doctor", "worktree", "trust",
     ...(commands ?? []).map(c => c.name),
   ];
 
@@ -429,6 +429,18 @@ Keep it under 150 lines, concise and useful as AI context.`;
       return true;
     }
 
+    if (input.startsWith("/trust")) {
+      const dir = input.slice(6).trim() || ".";
+      const resolved = path.resolve(process.cwd(), dir);
+      const trustedDirs = (executor as any).ctx?._trustedDirs ?? [];
+      if (!trustedDirs.includes(resolved)) {
+        trustedDirs.push(resolved);
+        (executor as any).ctx._trustedDirs = trustedDirs;
+      }
+      console.log(`Trusted: ${resolved} (no permission prompts for files in this directory)`);
+      return true;
+    }
+
     if (input === "/help") {
       console.log("Commands:");
       console.log("  /save       — Save current session");
@@ -448,6 +460,7 @@ Keep it under 150 lines, concise and useful as AI context.`;
       console.log("  /agent <name>  — Invoke a subagent for one turn");
       console.log("  /agents        — List available subagents");
       console.log("  /model [tier] [name] — Show/change models (main, fast, reasoning)");
+      console.log("  /trust [dir]  — Trust a directory (skip permission prompts)");
       console.log("  /help       — Show this help");
       console.log("\nMulti-line: type ``` to start/end a block, or end a line with \\ to continue");
       if (commands && commands.length > 0) {

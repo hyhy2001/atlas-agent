@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { loadExecPolicy, checkCommand } from "../../execpolicy.js";
+import { wrapCommand } from "../../sandbox.js";
 import { resolve } from "node:path";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
 
@@ -23,8 +25,16 @@ export const bashTool: ToolDefinition = {
     const { command, timeout = 30 } = input as { command: string; timeout?: number };
     const effectiveTimeout = Math.min(Math.max(timeout, 1), 300) * 1000;
 
+    const policy = loadExecPolicy();
+    const check = checkCommand(command, policy);
+    if (!check.allowed) {
+      return { toolUseId: "", content: check.reason ?? "Command blocked by execpolicy", isError: true };
+    }
+
+    const sandboxedCommand = wrapCommand(command, { timeout: timeout ?? 30 });
+
     return new Promise<ToolResult>((resolvePromise) => {
-      const child = spawn(command, {
+      const child = spawn(sandboxedCommand, {
         shell: true,
         cwd: resolve(ctx.workingDir),
         stdio: ["ignore", "pipe", "pipe"],

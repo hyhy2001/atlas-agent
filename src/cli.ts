@@ -218,6 +218,7 @@ async function main() {
   (ctx as any)._hooks = hooks;
   (ctx as any)._fastModel = config.fastModel;
   (ctx as any)._reasoningModel = config.reasoningModel;
+  (ctx as any)._trustedDirs = config.trustedDirs;
 
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
 

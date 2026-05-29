@@ -11,6 +11,7 @@ import { todoReadTool, todoWriteTool } from "./todo.js";
 import { delegateTool, delegateParallelTool } from "./delegate.js";
 import { memorySaveTool, memoryAppendTool, memoryReadTool, memoryDeleteTool } from "./memory.js";
 import { gitStatusTool, gitDiffTool, gitLogTool, gitCommitTool } from "./git.js";
+import { applyPatchTool } from "./apply_patch.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -33,4 +34,5 @@ export const builtinTools: ToolDefinition[] = [
   gitDiffTool,
   gitLogTool,
   gitCommitTool,
+  applyPatchTool,
 ];
