@@ -91,6 +91,7 @@ export const App: React.FC<AppProps> = (props) => {
   const fastModelRef = useRef(props.fastModel);
   const reasoningModelRef = useRef(process.env["ATLAS_REASONING_MODEL"]);
   const startedAtRef = useRef<number | null>(null);
+  const pendingCommitRef = useRef("");
 
   useEffect(() => {
     if (!isRunning) { setElapsedSecs(0); return; }
@@ -106,6 +107,25 @@ export const App: React.FC<AppProps> = (props) => {
     if (!isRunning) { setSpinFrame(0); return; }
     const id = setInterval(() => setSpinFrame(f => (f + 1) % 10), 500);
     return () => clearInterval(id);
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const id = setInterval(() => {
+      const text = pendingCommitRef.current;
+      if (text) {
+        pendingCommitRef.current = "";
+        setHistory(h => [...h, { type: "assistant", text: text.replace(/\n$/, "") }]);
+      }
+    }, 100);
+    return () => {
+      clearInterval(id);
+      const text = pendingCommitRef.current;
+      if (text) {
+        pendingCommitRef.current = "";
+        setHistory(h => [...h, { type: "assistant", text: text.replace(/\n$/, "") }]);
+      }
+    };
   }, [isRunning]);
 
   useEffect(() => {
@@ -196,17 +216,20 @@ export const App: React.FC<AppProps> = (props) => {
           if (lastNl >= committedLen) {
             const newComplete = rawSource.slice(committedLen, lastNl + 1);
             committedLen = lastNl + 1;
-            // Commit completed lines directly to Static — never goes through dynamic area
-            setHistory(h => [...h, { type: "assistant", text: newComplete.replace(/\n$/, "") }]);
+            // Batch into pending commit — flushed every 100ms by useEffect
+            pendingCommitRef.current += newComplete;
           }
           setLiveTail(rawSource.slice(committedLen));
         },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
-      // Commit any remaining tail (partial line without trailing \n)
+      // Flush any batched complete lines first, then commit remaining tail
+      const pending = pendingCommitRef.current;
+      pendingCommitRef.current = "";
       const tail = rawSource.slice(committedLen);
-      if (tail.trim()) {
-        setHistory(h => [...h, { type: "assistant", text: tail }]);
+      const finalText = pending + tail;
+      if (finalText.trim()) {
+        setHistory(h => [...h, { type: "assistant", text: finalText.replace(/\n$/, "") }]);
       }
       setLiveTail("");
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
@@ -614,9 +637,11 @@ export const App: React.FC<AppProps> = (props) => {
           <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+C · exit</Text>
         </Box>
       )}
-      <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
-        <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
-      </Box>
+      {!isRunning && (
+        <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
+          <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
+        </Box>
+      )}
     </Box>
   );
 };
