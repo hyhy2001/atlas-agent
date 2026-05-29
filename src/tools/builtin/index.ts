@@ -12,6 +12,7 @@ import { delegateTool, delegateParallelTool } from "./delegate.js";
 import { memorySaveTool, memoryAppendTool, memoryReadTool, memoryDeleteTool } from "./memory.js";
 import { gitStatusTool, gitDiffTool, gitLogTool, gitCommitTool } from "./git.js";
 import { applyPatchTool } from "./apply_patch.js";
+import { readManyFilesTool } from "./read_many_files.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -35,4 +36,5 @@ export const builtinTools: ToolDefinition[] = [
   gitLogTool,
   gitCommitTool,
   applyPatchTool,
+  readManyFilesTool,
 ];

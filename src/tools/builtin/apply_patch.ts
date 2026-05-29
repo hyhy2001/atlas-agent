@@ -1,160 +1,279 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
+import { existsSync } from "node:fs";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
 import { pushUndo } from "../../undo.js";
 
-interface PatchEdit {
+interface FileOp {
+  type: "update" | "add" | "delete";
   path: string;
-  edits: Array<{ old: string; new: string }>;
+  contexts?: string[];
+  oldLines?: string[];
+  newLines?: string[];
+  addContent?: string;
+  hunks?: Hunk[];
 }
 
-function parseUnifiedPatch(patch: string): PatchEdit[] {
-  const results: PatchEdit[] = [];
-  const fileBlocks = patch.split(/^--- /m).slice(1);
+interface Hunk {
+  contexts: string[];
+  oldLines: string[];
+  newLines: string[];
+}
 
-  for (const block of fileBlocks) {
-    const lines = block.split("\n");
-    const pathLine = lines[0].trim();
-    const filePath = pathLine.replace(/^a\//, "").replace(/^b\//, "");
+function parseCodexPatch(patch: string): FileOp[] {
+  const lines = patch.split("\n");
+  const ops: FileOp[] = [];
+  let current: FileOp | null = null;
+  let currentHunk: Hunk | null = null;
 
-    const edits: Array<{ old: string; new: string }> = [];
-    let oldLines: string[] = [];
-    let newLines: string[] = [];
-    let inHunk = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.startsWith("@@") || line.startsWith("+++ ")) {
-        if (oldLines.length || newLines.length) {
-          edits.push({ old: oldLines.join("\n"), new: newLines.join("\n") });
-          oldLines = [];
-          newLines = [];
+    if (line.startsWith("*** Begin Patch") || line.startsWith("*** End Patch") || line === "") {
+      if (line.startsWith("*** End Patch")) {
+        if (currentHunk && current?.hunks) current.hunks.push(currentHunk);
+        if (current) ops.push(current);
+      }
+      continue;
+    }
+
+    if (line.startsWith("*** Update File: ")) {
+      if (currentHunk && current?.hunks) current.hunks.push(currentHunk);
+      if (current) ops.push(current);
+      current = { type: "update", path: line.slice(17).trim(), hunks: [] };
+      currentHunk = null;
+      continue;
+    }
+
+    if (line.startsWith("*** Add File: ")) {
+      if (currentHunk && current?.hunks) current.hunks.push(currentHunk);
+      if (current) ops.push(current);
+      current = { type: "add", path: line.slice(14).trim(), addContent: "" };
+      currentHunk = null;
+      continue;
+    }
+
+    if (line.startsWith("*** Delete File: ")) {
+      if (currentHunk && current?.hunks) current.hunks.push(currentHunk);
+      if (current) ops.push(current);
+      current = { type: "delete", path: line.slice(17).trim() };
+      currentHunk = null;
+      continue;
+    }
+
+    if (!current) continue;
+
+    if (current.type === "add") {
+      if (line.startsWith("+")) {
+        current.addContent = (current.addContent ?? "") + line.slice(1) + "\n";
+      }
+      continue;
+    }
+
+    if (current.type === "update") {
+      if (line.startsWith("@@")) {
+        if (currentHunk && (currentHunk.oldLines.length || currentHunk.newLines.length)) {
+          current.hunks!.push(currentHunk);
+          currentHunk = { contexts: [line.slice(2).trim()], oldLines: [], newLines: [] };
+        } else if (currentHunk) {
+          currentHunk.contexts.push(line.slice(2).trim());
+        } else {
+          currentHunk = { contexts: [line.slice(2).trim()], oldLines: [], newLines: [] };
         }
-        inHunk = line.startsWith("@@");
         continue;
       }
-      if (!inHunk) continue;
+
+      if (!currentHunk) currentHunk = { contexts: [], oldLines: [], newLines: [] };
+
       if (line.startsWith("-")) {
-        oldLines.push(line.slice(1));
+        currentHunk.oldLines.push(line.slice(1));
       } else if (line.startsWith("+")) {
-        newLines.push(line.slice(1));
+        currentHunk.newLines.push(line.slice(1));
       } else if (line.startsWith(" ")) {
-        oldLines.push(line.slice(1));
-        newLines.push(line.slice(1));
+        currentHunk.oldLines.push(line.slice(1));
+        currentHunk.newLines.push(line.slice(1));
       }
     }
-    if (oldLines.length || newLines.length) {
-      edits.push({ old: oldLines.join("\n"), new: newLines.join("\n") });
-    }
-
-    if (edits.length > 0) {
-      results.push({ path: filePath, edits });
-    }
   }
 
-  return results;
+  if (currentHunk && current?.hunks) current.hunks.push(currentHunk);
+  if (current && !ops.includes(current)) ops.push(current);
+
+  return ops;
 }
 
-function parseSimplePatch(patch: string): PatchEdit[] {
-  const results: PatchEdit[] = [];
-  const fileBlocks = patch.split(/^--- /m).slice(1);
-
-  for (const block of fileBlocks) {
-    const lines = block.split("\n");
-    const filePath = lines[0].trim();
-    const content = lines.slice(1).join("\n");
-
-    const edits: Array<{ old: string; new: string }> = [];
-    const editRegex = /<<<\n([\s\S]*?)\n===\n([\s\S]*?)\n>>>/g;
-    let match: RegExpExecArray | null;
-    while ((match = editRegex.exec(content)) !== null) {
-      edits.push({ old: match[1], new: match[2] });
-    }
-
-    if (edits.length > 0) {
-      results.push({ path: filePath, edits });
-    }
-  }
-
-  return results;
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
 }
 
-function parsePatch(patch: string): PatchEdit[] {
-  if (patch.includes("<<<") && patch.includes(">>>")) {
-    return parseSimplePatch(patch);
+function findContextLine(content: string, contextHint: string): number {
+  if (!contextHint.trim()) return -1;
+  const lines = content.split("\n");
+  const target = normalizeWhitespace(contextHint);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (normalizeWhitespace(lines[i]).includes(target)) return i;
   }
-  return parseUnifiedPatch(patch);
+  return -1;
+}
+
+function applyHunk(content: string, hunk: Hunk): { content: string; ok: boolean; error?: string } {
+  if (hunk.oldLines.length === 0 && hunk.newLines.length === 0) {
+    return { content, ok: true };
+  }
+
+  const lines = content.split("\n");
+  let searchStart = 0;
+
+  for (const ctx of hunk.contexts) {
+    if (!ctx.trim()) continue;
+    const idx = findContextLine(lines.slice(searchStart).join("\n"), ctx);
+    if (idx === -1) {
+      return { content, ok: false, error: `context not found: "${ctx}"` };
+    }
+    searchStart += idx;
+  }
+
+  const oldStr = hunk.oldLines.join("\n");
+  const newStr = hunk.newLines.join("\n");
+
+  if (oldStr === "") {
+    const insertAt = searchStart + 1;
+    const out = [...lines.slice(0, insertAt), ...newStr.split("\n"), ...lines.slice(insertAt)].join("\n");
+    return { content: out, ok: true };
+  }
+
+  const remainingContent = lines.slice(searchStart).join("\n");
+  if (remainingContent.includes(oldStr)) {
+    const before = lines.slice(0, searchStart).join("\n");
+    const replaced = remainingContent.replace(oldStr, newStr);
+    return { content: before + (before ? "\n" : "") + replaced, ok: true };
+  }
+
+  const normalizedOld = normalizeWhitespace(oldStr);
+  const normalizedRemaining = normalizeWhitespace(remainingContent);
+  if (normalizedRemaining.includes(normalizedOld)) {
+    const oldLineCount = hunk.oldLines.length;
+    for (let i = searchStart; i <= lines.length - oldLineCount; i++) {
+      const candidate = lines.slice(i, i + oldLineCount).join("\n");
+      if (normalizeWhitespace(candidate) === normalizedOld) {
+        const result = [...lines.slice(0, i), ...newStr.split("\n"), ...lines.slice(i + oldLineCount)].join("\n");
+        return { content: result, ok: true };
+      }
+    }
+  }
+
+  return { content, ok: false, error: `old text not found:\n${oldStr.slice(0, 200)}` };
 }
 
 export const applyPatchTool: ToolDefinition = {
   name: "apply_patch",
-  description:
-    "Apply multiple edits to one or more files atomically using unified diff format. More efficient than multiple edit_file calls.",
+  description: `Apply a Codex-style patch to add/update/delete files. Format:
+
+*** Begin Patch
+*** Update File: path/to/file.ts
+@@ class Name
+@@   methodName
+-old line
++new line
+*** Add File: path/to/new.ts
++new file content
+*** Delete File: path/to/old.ts
+*** End Patch
+
+@@ lines provide context for locating the change (no exact prefix match needed). Whitespace-tolerant.`,
   inputSchema: {
     properties: {
       patch: {
         type: "string",
-        description:
-          "Unified diff format patch. Use --- a/path and +++ b/path headers, @@ hunk markers, -/+ lines for changes.",
+        description: "Codex-style patch text starting with *** Begin Patch and ending with *** End Patch",
       },
     },
     required: ["patch"],
   },
   isDestructive: true,
-
   async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
     const { patch } = input as { patch: string };
 
-    let fileEdits: PatchEdit[];
+    let ops: FileOp[];
     try {
-      fileEdits = parsePatch(patch);
+      ops = parseCodexPatch(patch);
     } catch (err) {
-      return { toolUseId: "", content: `Error parsing patch: ${err instanceof Error ? err.message : String(err)}`, isError: true };
+      return { toolUseId: "", content: `Parse error: ${err instanceof Error ? err.message : String(err)}`, isError: true };
     }
 
-    if (fileEdits.length === 0) {
-      return { toolUseId: "", content: "Error: no edits found in patch", isError: true };
+    if (ops.length === 0) {
+      return { toolUseId: "", content: "Error: no operations found in patch", isError: true };
     }
 
-    const fileContents = new Map<string, string>();
-    for (const fe of fileEdits) {
-      const fullPath = resolve(ctx.workingDir, fe.path);
-      try {
-        const content = await readFile(fullPath, "utf-8");
-        fileContents.set(fullPath, content);
-      } catch {
-        return { toolUseId: "", content: `Error: cannot read file: ${fe.path}`, isError: true };
-      }
-    }
+    const plannedWrites = new Map<string, string | null>();
+    const fileSnapshots = new Map<string, string | null>();
 
-    const newContents = new Map<string, string>();
-    for (const fe of fileEdits) {
-      const fullPath = resolve(ctx.workingDir, fe.path);
-      let content = fileContents.get(fullPath)!;
+    for (const op of ops) {
+      const fullPath = resolve(ctx.workingDir, op.path);
 
-      for (const edit of fe.edits) {
-        if (!content.includes(edit.old)) {
-          return { toolUseId: "", content: `Error: old text not found in ${fe.path}:\n${edit.old.slice(0, 100)}`, isError: true };
+      if (op.type === "delete") {
+        if (!existsSync(fullPath)) {
+          return { toolUseId: "", content: `Error: cannot delete non-existent file: ${op.path}`, isError: true };
         }
-        content = content.replace(edit.old, edit.new);
+        try {
+          fileSnapshots.set(fullPath, await readFile(fullPath, "utf-8"));
+        } catch {}
+        plannedWrites.set(fullPath, null);
+        continue;
       }
 
-      newContents.set(fullPath, content);
+      if (op.type === "add") {
+        if (existsSync(fullPath)) {
+          return { toolUseId: "", content: `Error: file already exists: ${op.path}`, isError: true };
+        }
+        fileSnapshots.set(fullPath, null);
+        plannedWrites.set(fullPath, op.addContent ?? "");
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = await readFile(fullPath, "utf-8");
+      } catch {
+        return { toolUseId: "", content: `Error: cannot read ${op.path}`, isError: true };
+      }
+      fileSnapshots.set(fullPath, content);
+
+      let modified = content;
+      for (const hunk of op.hunks ?? []) {
+        const result = applyHunk(modified, hunk);
+        if (!result.ok) {
+          return { toolUseId: "", content: `Error in ${op.path}: ${result.error}`, isError: true };
+        }
+        modified = result.content;
+      }
+      plannedWrites.set(fullPath, modified);
     }
 
-    const modified: string[] = [];
-    for (const [fullPath, newContent] of newContents) {
-      const original = fileContents.get(fullPath)!;
+    const summary: string[] = [];
+    for (const [fullPath, newContent] of plannedWrites) {
+      const original = fileSnapshots.get(fullPath) ?? null;
       pushUndo({ path: fullPath, previousContent: original, timestamp: Date.now() });
-      await mkdir(dirname(fullPath), { recursive: true });
-      await writeFile(fullPath, newContent, "utf-8");
-      modified.push(fullPath.replace(ctx.workingDir + "/", ""));
+
+      const relPath = fullPath.replace(ctx.workingDir + "/", "");
+      if (newContent === null) {
+        await unlink(fullPath);
+        summary.push(`  delete: ${relPath}`);
+      } else {
+        await mkdir(dirname(fullPath), { recursive: true });
+        await writeFile(fullPath, newContent, "utf-8");
+        if (original === null) {
+          summary.push(`  add:    ${relPath}`);
+        } else {
+          summary.push(`  update: ${relPath}`);
+        }
+      }
     }
 
-    const editCount = fileEdits.reduce((sum, fe) => sum + fe.edits.length, 0);
     return {
       toolUseId: "",
-      content: `Applied ${editCount} edit(s) to ${modified.length} file(s):\n${modified.map((f) => `  ${f}`).join("\n")}`,
+      content: `Applied ${ops.length} operation(s):\n${summary.join("\n")}`,
       isError: false,
     };
   },
