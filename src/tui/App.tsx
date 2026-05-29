@@ -493,7 +493,7 @@ export const App: React.FC<AppProps> = (props) => {
       {streamBuffer && <Text>{streamBuffer}</Text>}
       {isRunning && <Box><Text color="yellow"><Spinner /></Text><Text color="gray"> thinking...</Text></Box>}
       {!isRunning && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" width={80}>
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
             <Text>{input}</Text>
@@ -521,7 +521,7 @@ export const App: React.FC<AppProps> = (props) => {
           <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+C · exit</Text>
         </Box>
       )}
-      <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
+      <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={80}>
         <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
       </Box>
     </Box>
