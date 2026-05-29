@@ -366,15 +366,63 @@ export const App: React.FC<AppProps> = (props) => {
   }
 
   async function getAtSuggestions(query: string): Promise<string[]> {
-    if (!query) return [];
     try {
       const { execSync } = await import("node:child_process");
-      const result = execSync(
-        `find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' 2>/dev/null | grep -i "${query.replace(/[^a-zA-Z0-9._/-]/g, '')}" | head -8`,
-        { encoding: "utf8", cwd: process.cwd() }
+      const excludes = "-not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' -not -path '*/release/*'";
+      const raw = execSync(
+        `find . \\( -type f -o -type d \\) ${excludes} 2>/dev/null | head -2000`,
+        { encoding: "utf8", cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }
       ).trim();
-      if (!result) return [];
-      return result.split("\n").map(f => f.replace(/^\.\//, "")).filter(Boolean);
+      if (!raw) return [];
+
+      const { statSync } = await import("node:fs");
+      let entries = raw.split("\n")
+        .map(f => f.replace(/^\.\//, ""))
+        .filter(f => f && f !== ".");
+
+      entries = entries.map(f => {
+        try {
+          return statSync(f).isDirectory() ? f + "/" : f;
+        } catch {
+          return f;
+        }
+      });
+
+      const q = query.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
+
+      if (!q) {
+        return entries
+          .sort((a, b) => {
+            const da = a.split("/").length, db = b.split("/").length;
+            if (da !== db) return da - db;
+            return a.localeCompare(b);
+          })
+          .slice(0, 10);
+      }
+
+      return entries
+        .map(f => {
+          const lower = f.toLowerCase();
+          const base = lower.split("/").pop() ?? lower;
+          let score = -1;
+          if (base === q) score = 1000;
+          else if (base.startsWith(q)) score = 800;
+          else if (base.includes(q)) score = 600;
+          else if (lower.includes(q)) score = 400;
+          else {
+            let qi = 0;
+            for (let i = 0; i < lower.length && qi < q.length; i++) {
+              if (lower[i] === q[qi]) qi++;
+            }
+            if (qi === q.length) score = 200;
+          }
+          score -= f.split("/").length * 2;
+          return { f, score };
+        })
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10)
+        .map(x => x.f);
     } catch {
       return [];
     }
@@ -1026,8 +1074,16 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       }
       if (atSuggestions.length > 0) {
         const chosen = atSuggestions[atSuggestionIndex];
-        setInput(prev => prev.replace(/@([\w./\-]*)$/, `@${chosen}`));
-        setAtSuggestions([]);
+        const newVal = input.replace(/@([\w./\-]*)$/, `@${chosen}`);
+        setInput(newVal);
+        if (chosen.endsWith("/")) {
+          getAtSuggestions(chosen).then(s => {
+            setAtSuggestions(s);
+            setAtSuggestionIndex(0);
+          });
+        } else {
+          setAtSuggestions([]);
+        }
         return;
       }
       return;
