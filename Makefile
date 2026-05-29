@@ -130,16 +130,17 @@ install-bun:
 	@echo "  ✓ Bun $$( $(BUN_BIN) --version) installed at $(BUN_DIR)"
 	@echo "  Tip: add $(BUN_DIR)/bin to PATH to use system-wide"
 
-## deps: Install npm dependencies
+## deps: Install npm dependencies (uses bun install — respects all deps regardless of NODE_ENV)
 deps:
-	@echo "Installing npm dependencies..."
-	@echo "  NODE_ENV=$$NODE_ENV"
-	@echo "  npm omit=$$($(NPM) config get omit 2>/dev/null || echo none)"
-	@SKIP_BINARY_BUILD=1 NODE_ENV=development $(NPM) install --include=dev --legacy-peer-deps
+	@echo "Installing npm dependencies via bun..."
+	@SKIP_BINARY_BUILD=1 $(BUN) install
 	@if [ ! -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
 	  echo ""; \
-	  echo "  ✗ TypeScript still missing after install."; \
-	  echo "    Run: npm config set omit '' && rm -rf node_modules && make deps"; \
+	  echo "  ✗ TypeScript still missing at node_modules/typescript/bin/tsc"; \
+	  echo "    Diagnose:"; \
+	  echo "      ls -la node_modules/typescript/ 2>&1"; \
+	  echo "      cat package.json | grep -A2 devDep"; \
+	  echo "      $(BUN) install"; \
 	  exit 1; \
 	fi
 	@echo "  ✓ Dependencies installed"
