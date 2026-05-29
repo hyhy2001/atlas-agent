@@ -119,6 +119,7 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
       executor: subExecutor,
       systemPrompt,
       abortSignal: ctx.abortSignal,
+      onText: () => {},
     });
   } catch (err) {
     return `Error: ${err instanceof Error ? err.message : String(err)}`;
