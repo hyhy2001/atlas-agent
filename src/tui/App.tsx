@@ -134,6 +134,7 @@ export const App: React.FC<AppProps> = (props) => {
     runningControllerRef.current = controller;
     setIsRunning(true);
     setStreamBuffer("");
+    let streamedText = "";
     try {
       const result = await runAgentLoop({
         provider: options?.provider ?? props.provider,
@@ -142,10 +143,15 @@ export const App: React.FC<AppProps> = (props) => {
         executor: props.executor,
         systemPrompt: options?.systemPrompt ?? props.systemPrompt,
         abortSignal: controller.signal,
-        onText: text => setStreamBuffer(b => b + text),
+        onText: text => {
+          streamedText += text;
+          setStreamBuffer(b => b + text);
+        },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
-      setHistory(h => [...h, { type: "assistant", text: "" }]);
+      if (streamedText.trim()) {
+        setHistory(h => [...h, { type: "assistant", text: streamedText }]);
+      }
       setStreamBuffer("");
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
