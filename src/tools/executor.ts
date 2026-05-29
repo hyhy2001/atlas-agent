@@ -95,7 +95,7 @@ export class ToolExecutor {
       return { toolUseId: block.id, content: `Unknown tool: ${block.name}`, isError: true };
     }
 
-    const useSpinner = process.stdout.isTTY;
+    const useSpinner = process.stdout.isTTY && !process.env.__ATLAS_INK_MODE;
 
     try {
       // Run pre-hooks
@@ -182,7 +182,7 @@ export class ToolExecutor {
       }
     }
 
-    const useSpinner = process.stdout.isTTY;
+    const useSpinner = process.stdout.isTTY && !process.env.__ATLAS_INK_MODE;
 
     try {
       // Run pre-hooks (after permission granted)

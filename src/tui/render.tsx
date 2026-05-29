@@ -23,6 +23,7 @@ export async function startTui(params: {
   fastModel?: string;
   startInPlanMode?: boolean;
 }): Promise<void> {
+  process.env.__ATLAS_INK_MODE = "1";
   const { waitUntilExit } = render(
     <App
       provider={params.provider}
