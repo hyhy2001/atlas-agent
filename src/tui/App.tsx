@@ -37,8 +37,9 @@ interface AppProps {
 }
 
 interface HistoryEntry {
-  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result";
+  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full";
   text: string;
+  fullText?: string;
   toolName?: string;
   isError?: boolean;
 }
@@ -68,14 +69,14 @@ function formatToolName(name: string): string {
     read_file: "Read",
     write_file: "Write",
     edit_file: "Edit",
-    grep: "Grep",
-    glob: "Glob",
-    list_directory: "LS",
+    grep: "Search",
+    glob: "Find",
+    list_directory: "List",
     web_fetch: "Fetch",
     git_status: "Git",
     git_diff: "Git",
     git_log: "Git",
-    git_commit: "Git",
+    git_commit: "Commit",
     delegate: "Delegate",
     delegate_parallel: "Delegate",
     apply_patch: "Patch",
@@ -85,7 +86,7 @@ function formatToolName(name: string): string {
     memory_save: "Memory",
     memory_read: "Memory",
     memory_append: "Memory",
-    analyze_log: "Log",
+    analyze_log: "Analyze",
   };
   return map[name] ?? name.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join("");
 }
@@ -235,7 +236,7 @@ export const App: React.FC<AppProps> = (props) => {
         setCurrentToolName(name);
       };
       (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean) => {
-        setHistory(h => [...h, { type: "tool_result", text: resultStr, toolName: name, isError }]);
+        setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError }]);
       };
     } catch (e) {}
 
@@ -548,6 +549,31 @@ export const App: React.FC<AppProps> = (props) => {
   };
 
   useInput((inputChar, key) => {
+    // Ctrl+O: expand most recent truncated tool result
+    if (key.ctrl && inputChar === "o") {
+      setHistory(h => {
+        // Find the most recent tool_result entry that has hidden content
+        for (let i = h.length - 1; i >= 0; i--) {
+          const entry = h[i];
+          if (entry.type === "tool_result" && entry.fullText) {
+            const lineCount = entry.fullText.split("\n").length;
+            if (lineCount > 5) {
+              // Append a tool_result_full entry showing the complete output
+              return [...h, {
+                type: "tool_result_full",
+                text: entry.fullText,
+                toolName: entry.toolName,
+                isError: entry.isError,
+              }];
+            }
+            return h; // already short, nothing to expand
+          }
+        }
+        return h;
+      });
+      return;
+    }
+
     // Ctrl+C handling
     if (key.ctrl && inputChar === "c") {
       if (isRunning) {
@@ -634,12 +660,22 @@ export const App: React.FC<AppProps> = (props) => {
                   ))}
                   {hidden > 0 && (
                     <Box>
-                      <Text color="gray" dimColor>{"   … (" + hidden + " more lines)"}</Text>
+                      <Text color="gray" dimColor>{"   … +" + hidden + " lines (ctrl+o to expand)"}</Text>
                     </Box>
                   )}
                 </Box>
               );
             })()}
+            {entry.type === "tool_result_full" && (
+              <Box flexDirection="column" paddingLeft={2}>
+                {entry.text.split("\n").map((line, i) => (
+                  <Box key={i}>
+                    <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
+                    <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>{line}</Text>
+                  </Box>
+                ))}
+              </Box>
+            )}
             {entry.type === "system" && (
               <Text color="cyan" dimColor>{entry.text}</Text>
             )}
@@ -683,7 +719,7 @@ export const App: React.FC<AppProps> = (props) => {
               })()}
             </Box>
           )}
-          <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+C · exit</Text>
+          <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
         </Box>
       )}
       {!isRunning && (
