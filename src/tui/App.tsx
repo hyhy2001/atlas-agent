@@ -34,6 +34,7 @@ interface AppProps {
   fastModel?: string;
   startInPlanMode?: boolean;
   bannerText?: string;
+  mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }
 
 interface HistoryEntry {
@@ -772,16 +773,39 @@ export const App: React.FC<AppProps> = (props) => {
           byServer.get(server)!.push(toolName);
         }
       }
-      if (byServer.size === 0) {
-        addSystem("No MCP servers connected.\n\nMCP tools are configured in .atlas/settings.json under \"mcpServers\".\nIf codebase-memory shows \"command not found\" or a glibc error at startup,\nrun: make build-mcp  (builds the binary from source for your system).");
-      } else {
-        const lines: string[] = ["Connected MCP servers:"];
-        for (const [server, tools] of byServer) {
-          lines.push(`\n  ● ${server}  (${tools.length} tools)`);
-          for (const t of tools) lines.push(`      ${t}`);
-        }
-        addSystem(lines.join("\n"));
+
+      const lines: string[] = [];
+      const mcpStatus = props.mcpStatus ?? [];
+
+      if (mcpStatus.length === 0 && byServer.size === 0) {
+        addSystem("No MCP servers configured.\n\nAdd servers in .atlas/settings.json under \"mcpServers\".");
+        return true;
       }
+
+      // Show configured servers with status
+      for (const entry of mcpStatus) {
+        if (entry.status === "connected") {
+          lines.push(`● ${entry.name}  (${entry.toolCount} tools)  ✓ connected`);
+          const tools = byServer.get(entry.name) ?? [];
+          for (const t of tools) lines.push(`    ${t}`);
+        } else {
+          lines.push(`✗ ${entry.name}  — failed to connect`);
+          lines.push(`    command: ${entry.command}`);
+          if (entry.error) lines.push(`    error: ${entry.error}`);
+          lines.push(`    → If glibc mismatch: run  make build-mcp`);
+          lines.push(`    → If command not found: run  make install-mcp`);
+        }
+      }
+
+      // Show any MCP tools not in mcpStatus (edge case)
+      for (const [server, tools] of byServer) {
+        if (!mcpStatus.find(e => e.name === server)) {
+          lines.push(`● ${server}  (${tools.length} tools)`);
+          for (const t of tools) lines.push(`    ${t}`);
+        }
+      }
+
+      addSystem(lines.join("\n"));
       return true;
     }
     if (value.startsWith("/agent ") || value === "/agent") {

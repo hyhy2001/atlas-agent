@@ -83,6 +83,7 @@ export async function startTui(params: {
   totalToolCount?: number;
   fastModel?: string;
   startInPlanMode?: boolean;
+  mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }): Promise<void> {
   process.env.__ATLAS_INK_MODE = "1";
   const leaderTools = params.toolRegistry.getAll().length;
@@ -90,6 +91,7 @@ export async function startTui(params: {
   const { waitUntilExit } = render(
     <App
       bannerText={bannerText}
+      mcpStatus={params.mcpStatus}
       provider={params.provider}
       toolRegistry={params.toolRegistry}
       executor={params.executor}

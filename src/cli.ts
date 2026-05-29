@@ -206,10 +206,25 @@ async function main() {
   });
 
   const mcpClients: McpClient[] = [];
+  const mcpStatus: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }> = [];
   for (const serverConfig of config.mcpServers) {
     const client = await McpClient.create(serverConfig);
     if (client) {
       mcpClients.push(client);
+      mcpStatus.push({
+        name: serverConfig.name,
+        command: serverConfig.command,
+        status: "connected",
+        toolCount: client.getTools().length,
+      });
+    } else {
+      mcpStatus.push({
+        name: serverConfig.name,
+        command: serverConfig.command,
+        status: "failed",
+        toolCount: 0,
+        error: "see startup warnings above",
+      });
     }
   }
 
@@ -301,6 +316,7 @@ async function main() {
           fastModel: config.fastModel,
           hooks,
           totalToolCount: toolRegistry.getAll().length,
+          mcpStatus,
         });
       } else {
         await startRepl({
