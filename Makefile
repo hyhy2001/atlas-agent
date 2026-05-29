@@ -1,4 +1,4 @@
-.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp
+.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp deps binary ensure-node ensure-bun
 
 # Detect OS and arch
 OS     := $(shell uname -s 2>/dev/null || echo Windows)
