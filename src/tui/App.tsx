@@ -332,7 +332,7 @@ export const App: React.FC<AppProps> = (props) => {
   const subagentNames = ["atlas-swift", "atlas-forge", "atlas-deep", ...(props.subagents ?? []).map(s => s.name)];
   const completer = createCompleter({ commands: allCommandNames, subagentNames, cwd: process.cwd() });
   const suggestion = (() => {
-    if (!input.startsWith("/") && !input.includes("@")) return null;
+    if (!input.startsWith("/")) return null;
     const [hits] = completer(input);
     return hits.find(h => h !== input) ?? null;
   })();
