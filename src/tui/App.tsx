@@ -219,6 +219,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
   const [atSuggestions, setAtSuggestions] = useState<string[]>([]);
   const [atSuggestionIndex, setAtSuggestionIndex] = useState(0);
+  const [slashCmdIndex, setSlashCmdIndex] = useState(0);
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
   const [questionOverlay, setQuestionOverlay] = useState<{
@@ -335,6 +336,17 @@ export const App: React.FC<AppProps> = (props) => {
     if (!input.startsWith("/")) return null;
     const [hits] = completer(input);
     return hits.find(h => h !== input) ?? null;
+  })();
+  const slashCmds = (() => {
+    if (!input.startsWith("/") || input.length < 1) return [];
+    const allCmds = [
+      "/help","/save","/sessions","/load","/resume","/clear","/context",
+      "/plan","/execute","/compact","/cost","/stats","/init",
+      "/diff","/undo","/agent","/agents","/model","/doctor",
+      "/worktree","/trust",
+      ...(props.commands ?? []).map(c => `/${c.name}`),
+    ];
+    return allCmds.filter(c => c.startsWith(input)).slice(0, 8);
   })();
 
   function addSystem(text: string) {
@@ -962,20 +974,34 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
 
     // Tab → accept suggestion
     if (key.tab) {
+      if (slashCmds.length > 0) {
+        setInput(slashCmds[slashCmdIndex] + " ");
+        setSlashCmdIndex(0);
+        return;
+      }
       if (atSuggestions.length > 0) {
         const chosen = atSuggestions[atSuggestionIndex];
         setInput(prev => prev.replace(/@([\w./\-]*)$/, `@${chosen}`));
         setAtSuggestions([]);
         return;
       }
-      if (suggestion) setInput(suggestion);
       return;
     }
 
     // Enter → submit
     if (key.return) {
+      // If slash command list is showing and user navigated (not index 0 from typing),
+      // treat Enter as selecting the highlighted command
+      if (slashCmds.length > 0 && slashCmdIndex > 0) {
+        const chosen = slashCmds[slashCmdIndex];
+        setInput("");
+        setSlashCmdIndex(0);
+        handleSubmit(chosen);
+        return;
+      }
       const value = input;
       setInput("");
+      setSlashCmdIndex(0);
       setAtSuggestions([]);
       if (value.trim()) handleSubmit(value);
       return;
@@ -986,6 +1012,18 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       setInput((s) => s.slice(0, -1));
       setAtSuggestions([]);
       return;
+    }
+
+    // Navigate slash command suggestions with arrow keys
+    if (slashCmds.length > 0) {
+      if (key.upArrow) {
+        setSlashCmdIndex(i => Math.max(0, i - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setSlashCmdIndex(i => Math.min(slashCmds.length - 1, i + 1));
+        return;
+      }
     }
 
     // Navigate @ suggestions with arrow keys
@@ -1007,6 +1045,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     if (inputChar && !key.ctrl) {
       const newInput = input + inputChar;
       setInput(newInput);
+      setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
       if (atMatch) {
         const query = atMatch[1];
@@ -1216,25 +1255,16 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
             <Text>{input}</Text>
-            {suggestion && <Text color="gray" dimColor>{suggestion.slice(input.length)}</Text>}
             <Text color="gray">█</Text>
           </Box>
-          {input.startsWith("/") && input.length >= 1 && (
+          {slashCmds.length > 0 && (
             <Box flexDirection="column" paddingX={2}>
-              {(() => {
-                const allCmds = [
-                  "/help","/save","/sessions","/load","/resume","/clear","/context",
-                  "/plan","/execute","/compact","/cost","/stats","/init",
-                  "/diff","/undo","/agent","/agents","/model","/doctor",
-                  "/worktree","/trust",
-                  ...(props.commands ?? []).map(c => `/${c.name}`),
-                ];
-                return allCmds.filter(c => c.startsWith(input)).slice(0, 6).map((m, i) => (
-                  <Text key={m} color={i === 0 ? "cyan" : "gray"} dimColor={i !== 0}>
-                    {i === 0 ? "› " : "  "}{m}
-                  </Text>
-                ));
-              })()}
+              {slashCmds.map((m, i) => (
+                <Text key={m} color={i === slashCmdIndex ? "cyan" : "gray"} dimColor={i !== slashCmdIndex}>
+                  {i === slashCmdIndex ? "› " : "  "}{m}
+                </Text>
+              ))}
+              <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>
             </Box>
           )}
           {atSuggestions.length > 0 && (
