@@ -1,4 +1,4 @@
-.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp deps binary ensure-node ensure-bun
+.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp build-mcp deps binary ensure-node ensure-bun
 
 # Detect OS and arch
 OS     := $(shell uname -s 2>/dev/null || echo Windows)
@@ -204,6 +204,29 @@ install-mcp:
 	    echo "  Warning: download failed. Atlas will work without code intelligence."; \
 	  fi; \
 	fi
+
+## build-mcp: Build codebase-memory-mcp from source (use when release binary is glibc-incompatible)
+build-mcp:
+	@echo "Building codebase-memory-mcp from source..."
+	@command -v gcc >/dev/null 2>&1 || { echo "  ✗ gcc not found. Install: sudo apt install build-essential zlib1g-dev"; exit 1; }
+	@command -v git >/dev/null 2>&1 || { echo "  ✗ git not found"; exit 1; }
+	@if [ ! -f /usr/include/zlib.h ] && [ ! -f /usr/local/include/zlib.h ]; then \
+	  echo "  ✗ zlib headers not found. Install: sudo apt install zlib1g-dev"; exit 1; \
+	fi
+	@mkdir -p $(DEPS_DIR)
+	@rm -rf $(DEPS_DIR)/cbm-source
+	@echo "  Cloning source..."
+	@git clone --depth=1 https://github.com/DeusData/codebase-memory-mcp.git $(DEPS_DIR)/cbm-source 2>&1 | tail -3
+	@echo "  Building (~2-3 minutes)..."
+	@cd $(DEPS_DIR)/cbm-source && bash scripts/build.sh 2>&1 | tail -5
+	@if [ ! -f "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" ]; then \
+	  echo "  ✗ Build failed — binary not produced"; exit 1; \
+	fi
+	@mkdir -p .atlas/bin
+	@cp "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" .atlas/bin/codebase-memory-mcp
+	@chmod +x .atlas/bin/codebase-memory-mcp
+	@echo "  ✓ Built and installed to .atlas/bin/codebase-memory-mcp"
+	@echo "  ✓ Compiled with system glibc — no version mismatch"
 
 ## build-all: Build binaries for all platforms
 build-all: ensure-node ensure-bun deps build
