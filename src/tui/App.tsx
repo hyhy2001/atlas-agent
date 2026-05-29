@@ -607,21 +607,84 @@ export const App: React.FC<AppProps> = (props) => {
     }
     if (value === "/model" || value.startsWith("/model ")) {
       const arg = value.slice(6).trim();
-      if (!arg) addSystem(`Current models:\n  main:      ${props.provider.getModel()}     (leader)\n  fast:      ${fastModelRef.current ?? "(uses main)"}     (atlas-swift, atlas-forge)\n  reasoning: ${reasoningModelRef.current ?? "(uses main)"}     (atlas-deep)`);
-      else {
-        const parts = arg.split(/\s+/);
-        const tier = parts[0] === "fast" || parts[0] === "reasoning" || parts[0] === "main" ? parts[0] : "main";
-        const newModel = tier === "main" && parts[0] !== "main" ? arg : parts.slice(1).join(" ").trim();
-        if (!newModel) { addSystem(`Usage: /model ${tier} <name>`); return true; }
-        if (tier === "main") Object.assign(props.provider, props.provider.withModel(newModel));
-        else if (tier === "fast") { fastModelRef.current = newModel; process.env["ATLAS_FAST_MODEL"] = newModel; }
-        else { reasoningModelRef.current = newModel; process.env["ATLAS_REASONING_MODEL"] = newModel; }
-        addSystem(`${tier} model: ${newModel}`);
+      if (!arg) {
+        const mainModel = props.provider.getModel();
+        const fastModel = fastModelRef.current ?? "(uses main)";
+        const reasoningModel = reasoningModelRef.current ?? "(uses main)";
+        const chosen = await new Promise<string>((resolve) => {
+          setQuestionOverlay({
+            question: "Which model tier?",
+            items: [
+              { label: "main", sublabel: `${mainModel} — leader model`, value: "main" },
+              { label: "fast", sublabel: `${fastModel} — atlas-swift, atlas-forge`, value: "fast" },
+              { label: "reasoning", sublabel: `${reasoningModel} — atlas-deep`, value: "reasoning" },
+              { label: "show all", sublabel: "display current configuration", value: "show" },
+            ],
+            selectedIndex: 0,
+            resolve,
+          });
+        });
+        if (!chosen || chosen === "show") {
+          addSystem(`Models:\n  main:      ${mainModel}\n  fast:      ${fastModel}\n  reasoning: ${reasoningModel}`);
+          return true;
+        }
+        addSystem(`Type the new model name for "${chosen}" tier.\nUsage: /model ${chosen} <model-name>`);
+        return true;
       }
+      const parts = arg.split(/\s+/);
+      const tier = parts[0] === "fast" || parts[0] === "reasoning" || parts[0] === "main" ? parts[0] : "main";
+      const newModel = tier === "main" && parts[0] !== "main" ? arg : parts.slice(1).join(" ").trim();
+      if (!newModel) { addSystem(`Usage: /model ${tier} <name>`); return true; }
+      if (tier === "main") Object.assign(props.provider, props.provider.withModel(newModel));
+      else if (tier === "fast") { fastModelRef.current = newModel; process.env["ATLAS_FAST_MODEL"] = newModel; }
+      else { reasoningModelRef.current = newModel; process.env["ATLAS_REASONING_MODEL"] = newModel; }
+      addSystem(`${tier} model: ${newModel}`);
       return true;
     }
     if (value === "/init" || value === "/init --force") {
-      await runPrompt("Scan this project and generate an ATLAS.md file. Include project overview, directory structure, key files, build/run commands, and common tasks. Keep it under 150 lines, concise and useful as AI context.");
+      const force = value.includes("--force");
+      // Check if ATLAS.md already exists
+      try {
+        await fs.access(path.join(process.cwd(), "ATLAS.md"));
+        if (!force) {
+          addSystem("ATLAS.md already exists. Use /init --force to regenerate.");
+          return true;
+        }
+      } catch {}
+
+      addSystem("Scanning project structure...");
+
+      // Gather project info before running prompt
+      let projectInfo = "";
+      try {
+        const { execSync } = await import("node:child_process");
+        const tree = execSync(
+          "find . -maxdepth 3 -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/telemetry/*' | sort 2>/dev/null",
+          { encoding: "utf8", cwd: process.cwd() }
+        ).slice(0, 3000);
+        projectInfo += `\nProject file tree:\n${tree}`;
+      } catch {}
+
+      try {
+        const pkg = await fs.readFile(path.join(process.cwd(), "package.json"), "utf-8");
+        const parsed = JSON.parse(pkg);
+        projectInfo += `\n\npackage.json: name=${parsed.name}, version=${parsed.version}`;
+        if (parsed.scripts) projectInfo += `\nScripts: ${Object.keys(parsed.scripts).join(", ")}`;
+        if (parsed.dependencies) projectInfo += `\nDependencies: ${Object.keys(parsed.dependencies).slice(0, 15).join(", ")}`;
+      } catch {}
+
+      await runPrompt(`Generate an ATLAS.md file for this project. Here is the scanned project context:
+${projectInfo}
+
+Create a concise ATLAS.md (under 150 lines) with these sections:
+1. **Project overview** — what this project does (1-2 sentences)
+2. **Key directories** — what each important directory contains
+3. **Build/run/test commands** — exact commands to build, run, test
+4. **Architecture** — main components and how they connect
+5. **Common tasks** — how to add features, run tests, debug
+6. **Conventions** — important patterns, constraints, or rules
+
+Write the file using write_file tool to ATLAS.md in the current directory.`);
       return true;
     }
     if (value === "/diff" || value.startsWith("/diff ")) {
