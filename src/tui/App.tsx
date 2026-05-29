@@ -1200,7 +1200,13 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       )}
       {!isRunning && (
         <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
-          <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
+          <Text color="gray">{(() => {
+            const parts: string[] = [];
+            if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens`);
+            const m = props.provider.getModel();
+            if (m) parts.push(`model: ${m}`);
+            return ` ${parts.join("  ·  ")} `;
+          })()}</Text>
         </Box>
       )}
     </Box>
