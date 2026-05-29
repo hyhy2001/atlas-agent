@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 
 import Spinner from "ink-spinner";
 import fs from "node:fs/promises";
