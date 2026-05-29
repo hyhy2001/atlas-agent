@@ -37,8 +37,10 @@ interface AppProps {
 }
 
 interface HistoryEntry {
-  type: "user" | "assistant" | "system";
+  type: "user" | "assistant" | "system" | "tool_call" | "tool_result";
   text: string;
+  toolName?: string;
+  isError?: boolean;
 }
 
 const COMMANDS = [
@@ -60,6 +62,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState("");
+  const [currentToolName, setCurrentToolName] = useState("");
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
@@ -135,6 +138,18 @@ export const App: React.FC<AppProps> = (props) => {
     setIsRunning(true);
     setStreamBuffer("");
     let streamedText = "";
+
+    // Install tool callbacks on executor to capture tool call events when running in Ink mode
+    try {
+      (props.executor as any)._onToolCall = (name: string, summary: string) => {
+        setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name }]);
+        setCurrentToolName(name);
+      };
+      (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean) => {
+        setHistory(h => [...h, { type: "tool_result", text: resultStr, toolName: name, isError }]);
+      };
+    } catch (e) {}
+
     try {
       const result = await runAgentLoop({
         provider: options?.provider ?? props.provider,
@@ -165,7 +180,10 @@ export const App: React.FC<AppProps> = (props) => {
       addSystem(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsRunning(false);
+      setCurrentToolName("");
       runningControllerRef.current = null;
+      (props.executor as any)._onToolCall = undefined;
+      (props.executor as any)._onToolResult = undefined;
     }
   }
 
@@ -489,15 +507,51 @@ export const App: React.FC<AppProps> = (props) => {
         <Text color="gray">  Model: {model}</Text>
         <Text color="gray">  Type /help for commands, "exit" to quit</Text>
       </Box>
-      <Box flexDirection="column">
-        {history.map((entry, i) => (
-          <Box key={i} marginBottom={1}>
-            {entry.type === "user" ? <Text><Text color="cyan" bold>{">"} </Text>{entry.text}</Text> : <Text color={entry.type === "system" ? "yellow" : undefined}>{entry.text}</Text>}
+      <Static items={history}>
+        {(entry, index) => (
+          <Box key={index} flexDirection="column" marginBottom={1}>
+            {entry.type === "user" && (
+              <Box>
+                <Text color="cyan" bold>{"> "}</Text>
+                <Text bold>{entry.text}</Text>
+              </Box>
+            )}
+            {entry.type === "assistant" && (
+              <Box paddingLeft={0}>
+                <Text>{entry.text}</Text>
+              </Box>
+            )}
+            {entry.type === "tool_call" && (
+              <Box>
+                <Text color="gray" dimColor>{"  ↳ "}</Text>
+                <Text color="cyan">{entry.toolName ?? "tool"}</Text>
+                {entry.text && <Text color="gray" dimColor>{": " + entry.text}</Text>}
+              </Box>
+            )}
+            {entry.type === "tool_result" && (
+              <Box paddingLeft={4}>
+                <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>
+                  {entry.text.slice(0, 200)}{entry.text.length > 200 ? "…" : ""}
+                </Text>
+              </Box>
+            )}
+            {entry.type === "system" && (
+              <Text color="yellow" dimColor>{entry.text}</Text>
+            )}
           </Box>
-        ))}
-      </Box>
-      {streamBuffer && <Text>{streamBuffer}</Text>}
-      {isRunning && <Box><Text color="yellow"><Spinner /></Text><Text color="gray"> thinking...</Text></Box>}
+        )}
+      </Static>
+      {streamBuffer && (
+        <Box flexDirection="column">
+          <Text>{streamBuffer}</Text>
+        </Box>
+      )}
+      {isRunning && (
+        <Box>
+          <Text color="yellow"><Spinner /></Text>
+          <Text color="gray"> {currentToolName ? `${currentToolName}…` : "thinking…"}</Text>
+        </Box>
+      )}
       {!isRunning && (
         <Box flexDirection="column" width={80}>
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>

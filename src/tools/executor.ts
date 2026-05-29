@@ -130,6 +130,9 @@ export class ToolExecutor {
           return { toolUseId: block.id, content: `Error: ${msg}`, isError: true };
         }
       } else {
+        const onToolCall = (this as any)._onToolCall;
+        if (onToolCall) onToolCall(block.name, getToolSummary(block.name, block.input));
+
         const result = await tool.execute(block.input, this.ctx);
 
         // Run post hooks (best-effort)
@@ -139,6 +142,9 @@ export class ToolExecutor {
           // best-effort
           await runHook(hook, env).catch(() => {});
         }
+
+        const onToolResult = (this as any)._onToolResult;
+        if (onToolResult) onToolResult(block.name, result.content ?? "", result.isError ?? false);
 
         return { ...result, toolUseId: block.id };
       }
@@ -227,6 +233,9 @@ export class ToolExecutor {
           }
         }
 
+        const onToolCall = (this as any)._onToolCall;
+        if (onToolCall) onToolCall(block.name, getToolSummary(block.name, block.input));
+
         const result = await tool.execute(block.input, this.ctx);
 
         // Run post hooks (best-effort)
@@ -236,6 +245,9 @@ export class ToolExecutor {
           // best-effort
           await runHook(hook, env).catch(() => {});
         }
+
+        const onToolResult = (this as any)._onToolResult;
+        if (onToolResult) onToolResult(block.name, result.content ?? "", result.isError ?? false);
 
         return { ...result, toolUseId: block.id };
       }
