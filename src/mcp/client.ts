@@ -4,7 +4,7 @@ import { join } from "node:path";
 import which from "which";
 import type { McpServerConfig } from "./types.js";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../tools/types.js";
-import { getPortableRoot } from "../config.js";
+import { paths } from "../paths.js";
 
 export class McpClient {
   private client: Client;
@@ -36,10 +36,9 @@ export class McpClient {
         return null;
       }
 
-      const portableRoot = getPortableRoot();
       const env =
-        portableRoot && config.name === "codebase-memory"
-          ? { ...process.env, CBM_CACHE_DIR: join(portableRoot, "cache") } as Record<string, string>
+        config.name === "codebase-memory"
+          ? { ...process.env, CBM_CACHE_DIR: paths.cache() } as Record<string, string>
           : undefined;
 
       const transport = new StdioClientTransport({
