@@ -380,7 +380,7 @@ export const App: React.FC<AppProps> = (props) => {
     }
     try {
       const { execSync } = await import("node:child_process");
-      const excludes = "-not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' -not -path '*/release/*'";
+      const excludes = "-not -path './node_modules*' -not -path './.git*' -not -path './dist*' -not -path './deps*' -not -path './release*' -not -path './.atlas/sessions*' -not -path './.atlas/cache*' -not -path './.atlas/bin*' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/release/*'";
       // Directories first (with trailing slash), then files — no per-entry statSync
       const dirRaw = execSync(
         `find . -type d ${excludes} 2>/dev/null | head -1000`,
@@ -403,11 +403,15 @@ export const App: React.FC<AppProps> = (props) => {
   }
 
   function filterAtSuggestions(entries: string[], query: string): AtSuggestion[] {
+    const depthOf = (s: string) => {
+      const trimmed = s.endsWith("/") ? s.slice(0, -1) : s;
+      return trimmed.split("/").length;
+    };
     const q = query.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
     if (!q) {
       return entries
         .sort((a, b) => {
-          const da = a.split("/").length, db = b.split("/").length;
+          const da = depthOf(a), db = depthOf(b);
           if (da !== db) return da - db;
           // Folders (end with /) before files at same depth
           const aDir = a.endsWith("/"), bDir = b.endsWith("/");
