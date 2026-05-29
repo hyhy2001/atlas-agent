@@ -55,6 +55,9 @@ NODE := $(shell command -v node 2>/dev/null || echo $(NODE_BIN))
 NPM  := $(shell command -v npm  2>/dev/null || echo $(NPM_BIN))
 BUN  := $(shell command -v bun  2>/dev/null || echo $(BUN_BIN))
 
+# Prepend deps bin dirs to PATH so subprocesses (tsc shebang #!/usr/bin/env node etc.) find them
+export PATH := $(NODE_DIR)/bin:$(BUN_DIR)/bin:$(PATH)
+
 # Default target
 all: install
 
