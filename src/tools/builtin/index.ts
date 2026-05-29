@@ -13,6 +13,7 @@ import { memorySaveTool, memoryAppendTool, memoryReadTool, memoryDeleteTool } fr
 import { gitStatusTool, gitDiffTool, gitLogTool, gitCommitTool } from "./git.js";
 import { applyPatchTool } from "./apply_patch.js";
 import { readManyFilesTool } from "./read_many_files.js";
+import { analyzeLogTool } from "./analyze_log.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -37,4 +38,5 @@ export const builtinTools: ToolDefinition[] = [
   gitCommitTool,
   applyPatchTool,
   readManyFilesTool,
+  analyzeLogTool,
 ];
