@@ -408,9 +408,12 @@ export const App: React.FC<AppProps> = (props) => {
         .sort((a, b) => {
           const da = a.split("/").length, db = b.split("/").length;
           if (da !== db) return da - db;
+          // Folders (end with /) before files at same depth
+          const aDir = a.endsWith("/"), bDir = b.endsWith("/");
+          if (aDir !== bDir) return aDir ? -1 : 1;
           return a.localeCompare(b);
         })
-        .slice(0, 10)
+        .slice(0, 12)
         .map(path => ({ path }));
     }
 
@@ -1408,7 +1411,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       {!isRunning && (
         <Box flexDirection="column" width={fullWidth}>
           <Box>
-            <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 4 : 0) - 1))}</Text>
+            <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 3 : 0)))}</Text>
             {gitBranch && <Text color="gray" dimColor>{" " + gitBranch + " ─"}</Text>}
           </Box>
           <Box paddingX={1}>
@@ -1452,16 +1455,11 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             </Box>
           )}
           <Box>
-            <Box flexGrow={1}>
-              <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (permMode !== "ask" ? PERM_MODE_LABELS[permMode].length + 4 : 0) - 1))}</Text>
-            </Box>
-            {permMode !== "ask" && (
-              <Text color={permMode === "plan" ? "yellow" : "green"} dimColor>{" " + PERM_MODE_LABELS[permMode] + " ─"}</Text>
-            )}
+            <Text color="gray" dimColor>{"─".repeat(fullWidth)}</Text>
           </Box>
           <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
             <Text color="gray" dimColor>Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
-            <Text color="gray" dimColor>shift+tab · mode</Text>
+            <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>shift+tab · {PERM_MODE_LABELS[permMode]}</Text>
           </Box>
         </Box>
       )}
