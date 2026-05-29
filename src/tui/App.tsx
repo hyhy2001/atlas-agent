@@ -550,7 +550,7 @@ export const App: React.FC<AppProps> = (props) => {
         </Box>
       )}
       {!isRunning && (
-        <Box flexDirection="column" width={80}>
+        <Box flexDirection="column" width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
           <Box borderStyle="round" borderColor="cyan" paddingX={1}>
             <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
             <Text>{input}</Text>
@@ -578,7 +578,7 @@ export const App: React.FC<AppProps> = (props) => {
           <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+C · exit</Text>
         </Box>
       )}
-      <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={80}>
+      <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1} width={Math.min((process.stdout.columns ?? 80) - 2, 120)}>
         <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
       </Box>
     </Box>
