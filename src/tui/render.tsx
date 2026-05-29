@@ -14,7 +14,7 @@ function buildBanner(leaderTools: number, totalTools: number, model: string): st
   const cols = process.stdout.columns ?? 100;
   const width = Math.min(cols - 2, 120);
   const leftW = 40;
-  const rightW = width - leftW - 3;
+  const rightW = width - leftW - 4;
   const g = chalk.gray;
   const c = chalk.bold.cyan;
   const w = chalk.white;
@@ -60,7 +60,7 @@ function buildBanner(leaderTools: number, totalTools: number, model: string): st
   for (let i = 0; i < maxLines; i++) {
     const left = center(leftLines[i] ?? "", leftW);
     const right = pad(rightLines[i] ?? "", rightW);
-    lines.push(`│${left}│ ${right}│`);
+    lines.push(`│${left}│  ${right}│`);
   }
   lines.push(botBorder, "");
   return lines.join("\n");

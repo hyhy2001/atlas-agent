@@ -217,6 +217,8 @@ export const App: React.FC<AppProps> = (props) => {
   const [permMode, setPermMode] = useState<PermMode>("ask");
   const [gitBranch, setGitBranch] = useState<string>("");
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+  const [atSuggestions, setAtSuggestions] = useState<string[]>([]);
+  const [atSuggestionIndex, setAtSuggestionIndex] = useState(0);
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
   const [questionOverlay, setQuestionOverlay] = useState<{
@@ -348,6 +350,21 @@ export const App: React.FC<AppProps> = (props) => {
       messageCount: messagesRef.current.length,
       messages: messagesRef.current,
     };
+  }
+
+  async function getAtSuggestions(query: string): Promise<string[]> {
+    if (!query) return [];
+    try {
+      const { execSync } = await import("node:child_process");
+      const result = execSync(
+        `find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' 2>/dev/null | grep -i "${query.replace(/[^a-zA-Z0-9._/-]/g, '')}" | head -8`,
+        { encoding: "utf8", cwd: process.cwd() }
+      ).trim();
+      if (!result) return [];
+      return result.split("\n").map(f => f.replace(/^\.\//, "")).filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   async function processAtMentions(value: string): Promise<string> {
@@ -945,6 +962,12 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
 
     // Tab → accept suggestion
     if (key.tab) {
+      if (atSuggestions.length > 0) {
+        const chosen = atSuggestions[atSuggestionIndex];
+        setInput(prev => prev.replace(/@([\w./\-]*)$/, `@${chosen}`));
+        setAtSuggestions([]);
+        return;
+      }
       if (suggestion) setInput(suggestion);
       return;
     }
@@ -953,6 +976,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     if (key.return) {
       const value = input;
       setInput("");
+      setAtSuggestions([]);
       if (value.trim()) handleSubmit(value);
       return;
     }
@@ -960,7 +984,20 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     // Backspace
     if (key.backspace || key.delete) {
       setInput((s) => s.slice(0, -1));
+      setAtSuggestions([]);
       return;
+    }
+
+    // Navigate @ suggestions with arrow keys
+    if (atSuggestions.length > 0) {
+      if (key.upArrow) {
+        setAtSuggestionIndex(i => Math.max(0, i - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setAtSuggestionIndex(i => Math.min(atSuggestions.length - 1, i + 1));
+        return;
+      }
     }
 
     // Skip other special keys
@@ -968,7 +1005,18 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
 
     // Regular character — append
     if (inputChar && !key.ctrl) {
-      setInput((s) => s + inputChar);
+      const newInput = input + inputChar;
+      setInput(newInput);
+      const atMatch = newInput.match(/@([\w./\-]*)$/);
+      if (atMatch) {
+        const query = atMatch[1];
+        getAtSuggestions(query).then(suggestions => {
+          setAtSuggestions(suggestions);
+          setAtSuggestionIndex(0);
+        });
+      } else {
+        setAtSuggestions([]);
+      }
     }
   });
 
@@ -1187,6 +1235,16 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
                   </Text>
                 ));
               })()}
+            </Box>
+          )}
+          {atSuggestions.length > 0 && (
+            <Box flexDirection="column" paddingX={2}>
+              {atSuggestions.map((f, i) => (
+                <Text key={f} color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
+                  {i === atSuggestionIndex ? "› " : "  "}@{f}
+                </Text>
+              ))}
+              <Text color="gray" dimColor>  Tab to complete · ↑↓ navigate</Text>
             </Box>
           )}
           <Box justifyContent="space-between" width={fullWidth}>
