@@ -151,6 +151,14 @@ export const App: React.FC<AppProps> = (props) => {
     } catch (e) {}
 
     try {
+      let pendingFlush: NodeJS.Timeout | null = null;
+      const flushBuffer = () => {
+        if (pendingFlush) return;
+        pendingFlush = setTimeout(() => {
+          setStreamBuffer(streamedText);
+          pendingFlush = null;
+        }, 50);
+      };
       const result = await runAgentLoop({
         provider: options?.provider ?? props.provider,
         messages: messagesRef.current,
@@ -160,7 +168,7 @@ export const App: React.FC<AppProps> = (props) => {
         abortSignal: controller.signal,
         onText: text => {
           streamedText += text;
-          setStreamBuffer(b => b + text);
+          flushBuffer();
         },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
