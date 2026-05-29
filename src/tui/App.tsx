@@ -365,67 +365,78 @@ export const App: React.FC<AppProps> = (props) => {
     };
   }
 
-  async function getAtSuggestions(query: string): Promise<string[]> {
+  // Cache file list — built once on first @ trigger, filtered in-memory per keystroke
+  const fileListCacheRef = useRef<string[] | null>(null);
+  const fileListCacheTimeRef = useRef<number>(0);
+  const FILE_CACHE_TTL = 30000; // rebuild cache every 30s
+
+  async function buildFileCache(): Promise<string[]> {
+    const now = Date.now();
+    if (fileListCacheRef.current && now - fileListCacheTimeRef.current < FILE_CACHE_TTL) {
+      return fileListCacheRef.current;
+    }
     try {
       const { execSync } = await import("node:child_process");
+      const { statSync } = await import("node:fs");
       const excludes = "-not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' -not -path '*/release/*'";
       const raw = execSync(
         `find . \\( -type f -o -type d \\) ${excludes} 2>/dev/null | head -2000`,
         { encoding: "utf8", cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }
       ).trim();
       if (!raw) return [];
-
-      const { statSync } = await import("node:fs");
-      let entries = raw.split("\n")
+      const entries = raw.split("\n")
         .map(f => f.replace(/^\.\//, ""))
-        .filter(f => f && f !== ".");
-
-      entries = entries.map(f => {
-        try {
-          return statSync(f).isDirectory() ? f + "/" : f;
-        } catch {
-          return f;
-        }
-      });
-
-      const q = query.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
-
-      if (!q) {
-        return entries
-          .sort((a, b) => {
-            const da = a.split("/").length, db = b.split("/").length;
-            if (da !== db) return da - db;
-            return a.localeCompare(b);
-          })
-          .slice(0, 10);
-      }
-
-      return entries
+        .filter(f => f && f !== ".")
         .map(f => {
-          const lower = f.toLowerCase();
-          const base = lower.split("/").pop() ?? lower;
-          let score = -1;
-          if (base === q) score = 1000;
-          else if (base.startsWith(q)) score = 800;
-          else if (base.includes(q)) score = 600;
-          else if (lower.includes(q)) score = 400;
-          else {
-            let qi = 0;
-            for (let i = 0; i < lower.length && qi < q.length; i++) {
-              if (lower[i] === q[qi]) qi++;
-            }
-            if (qi === q.length) score = 200;
-          }
-          score -= f.split("/").length * 2;
-          return { f, score };
-        })
-        .filter(x => x.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 10)
-        .map(x => x.f);
+          try { return statSync(f).isDirectory() ? f + "/" : f; } catch { return f; }
+        });
+      fileListCacheRef.current = entries;
+      fileListCacheTimeRef.current = now;
+      return entries;
     } catch {
       return [];
     }
+  }
+
+  function filterAtSuggestions(entries: string[], query: string): string[] {
+    const q = query.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
+    if (!q) {
+      return entries
+        .sort((a, b) => {
+          const da = a.split("/").length, db = b.split("/").length;
+          if (da !== db) return da - db;
+          return a.localeCompare(b);
+        })
+        .slice(0, 10);
+    }
+    return entries
+      .map(f => {
+        const lower = f.toLowerCase();
+        const base = lower.split("/").pop() ?? lower;
+        let score = -1;
+        if (base === q) score = 1000;
+        else if (base.startsWith(q)) score = 800;
+        else if (base.includes(q)) score = 600;
+        else if (lower.includes(q)) score = 400;
+        else {
+          let qi = 0;
+          for (let i = 0; i < lower.length && qi < q.length; i++) {
+            if (lower[i] === q[qi]) qi++;
+          }
+          if (qi === q.length) score = 200;
+        }
+        score -= f.split("/").length * 2;
+        return { f, score };
+      })
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .map(x => x.f);
+  }
+
+  async function getAtSuggestions(query: string): Promise<string[]> {
+    const entries = await buildFileCache();
+    return filterAtSuggestions(entries, query);
   }
 
   async function processAtMentions(value: string): Promise<string> {
