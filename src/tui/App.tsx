@@ -562,12 +562,12 @@ export const App: React.FC<AppProps> = (props) => {
     <Box flexDirection="column">
       <Static items={history}>
         {(entry, index) => (
-          <Box key={index} flexDirection="column" marginBottom={1}>
+          <Box key={index} flexDirection="column" marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
             {entry.type === "banner" && (
               <Text>{entry.text}</Text>
             )}
             {entry.type === "user" && (
-              <Box>
+              <Box marginTop={1}>
                 <Text color="cyan" bold>{"> "}</Text>
                 <Text bold>{entry.text}</Text>
               </Box>
