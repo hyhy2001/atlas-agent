@@ -461,7 +461,34 @@ export const App: React.FC<AppProps> = (props) => {
       </Box>
       {streamBuffer && <Text>{streamBuffer}</Text>}
       {isRunning && <Box><Text color="yellow"><Spinner /></Text><Text color="gray"> thinking...</Text></Box>}
-      {!isRunning && <Box><Text color="cyan" bold>{planActive ? "[plan] > " : multiline ? "... " : "> "}</Text><TextInput value={input} onChange={setInput} onSubmit={handleSubmit} placeholder="" />{suggestion && <Text color="gray" dimColor>{suggestion.slice(input.length)}</Text>}</Box>}
+      {!isRunning && (
+        <Box flexDirection="column">
+          <Box borderStyle="round" borderColor="cyan" paddingX={1}>
+            <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "> "}</Text>
+            <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} placeholder="" />
+            {suggestion && <Text color="gray" dimColor>{suggestion.slice(input.length)}</Text>}
+          </Box>
+          {input.startsWith("/") && input.length >= 1 && (
+            <Box flexDirection="column" paddingX={2}>
+              {(() => {
+                const allCmds = [
+                  "/help","/save","/sessions","/load","/clear","/context",
+                  "/plan","/execute","/compact","/cost","/stats","/init",
+                  "/diff","/undo","/agent","/agents","/model","/doctor",
+                  "/worktree","/trust",
+                  ...(props.commands ?? []).map(c => `/${c.name}`),
+                ];
+                return allCmds.filter(c => c.startsWith(input)).slice(0, 6).map((m, i) => (
+                  <Text key={m} color={i === 0 ? "cyan" : "gray"} dimColor={i !== 0}>
+                    {i === 0 ? "› " : "  "}{m}
+                  </Text>
+                ));
+              })()}
+            </Box>
+          )}
+          <Text color="gray" dimColor>  Tab · complete  ↵ · send  Ctrl+C · exit</Text>
+        </Box>
+      )}
       <Box marginTop={1} borderStyle="single" borderColor="gray" paddingX={1}>
         <Text color="gray">{tokens.input + tokens.output > 0 ? ` ${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓ tokens ` : ""}{props.provider.getModel() && ` • ${props.provider.getModel()}`}</Text>
       </Box>
