@@ -7,6 +7,7 @@ import { ToolExecutor } from "./tools/executor.js";
 import { builtinTools } from "./tools/builtin/index.js";
 import { PermissionSession } from "./permissions/session.js";
 import { startRepl } from "./repl.js";
+import { startTui } from "./tui/render.js";
 import { runHeadless } from "./headless.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./agent/system_prompt.js";
 import { listSessions, loadSession } from "./sessions.js";
@@ -262,20 +263,38 @@ async function main() {
         json: args.json,
       });
     } else {
-      await startRepl({
-        provider,
-        toolRegistry: leaderRegistry,
-        executor,
-        systemPrompt,
-        initialSession,
-        projectContextPath: projectContextPath ?? undefined,
-        commands,
-        startInPlanMode: args.plan,
-        subagents,
-        fastModel: config.fastModel,
-        hooks,
-        totalToolCount: toolRegistry.getAll().length,
-      });
+      // If we have a TTY, start the Ink TUI, otherwise fall back to readline REPL
+      if (process.stdout.isTTY && process.stdin.isTTY) {
+        await startTui({
+          provider,
+          toolRegistry: leaderRegistry,
+          executor,
+          systemPrompt,
+          initialSession,
+          projectContextPath: projectContextPath ?? undefined,
+          commands,
+          startInPlanMode: args.plan,
+          subagents,
+          fastModel: config.fastModel,
+          hooks,
+          totalToolCount: toolRegistry.getAll().length,
+        });
+      } else {
+        await startRepl({
+          provider,
+          toolRegistry: leaderRegistry,
+          executor,
+          systemPrompt,
+          initialSession,
+          projectContextPath: projectContextPath ?? undefined,
+          commands,
+          startInPlanMode: args.plan,
+          subagents,
+          fastModel: config.fastModel,
+          hooks,
+          totalToolCount: toolRegistry.getAll().length,
+        });
+      }
     }
   } finally {
     await cleanup();

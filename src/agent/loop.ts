@@ -16,8 +16,9 @@ export async function runAgentLoop(params: {
   executor: ToolExecutor;
   systemPrompt?: string;
   abortSignal: AbortSignal;
+  onText?: (text: string) => void;
 }): Promise<LoopResult> {
-  const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal } = params;
+  const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal, onText } = params;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
@@ -35,7 +36,10 @@ export async function runAgentLoop(params: {
 
       if (delta.type === "text" && delta.text) {
         const rendered = renderer.write(delta.text);
-        if (rendered) process.stdout.write(rendered);
+        if (rendered) {
+          if (onText) onText(rendered);
+          else process.stdout.write(rendered);
+        }
         assistantContent += delta.text;
       } else if (delta.type === "tool_call_start") {
         if (currentToolCall) {
@@ -67,7 +71,10 @@ export async function runAgentLoop(params: {
     }
 
     const flushed = renderer.flush();
-    if (flushed) process.stdout.write(flushed);
+    if (flushed) {
+      if (onText) onText(flushed);
+      else process.stdout.write(flushed);
+    }
 
     totalInputTokens += Math.ceil(JSON.stringify(messages).length / 4);
     totalOutputTokens += Math.ceil((assistantContent.length + JSON.stringify(toolCalls).length) / 4);
