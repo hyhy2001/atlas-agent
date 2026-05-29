@@ -108,7 +108,22 @@ install-node:
 install-bun:
 	@echo "Installing Bun into $(BUN_DIR)..."
 	@mkdir -p $(BUN_DIR)/bin
-	@BUN_INSTALL="$(BUN_DIR)" curl -fsSL https://bun.sh/install | bash
+	@case "$(PLATFORM)-$(ARCH_NAME)" in \
+	  linux-x64)    BUN_ZIP="bun-linux-x64.zip" ;; \
+	  linux-arm64)  BUN_ZIP="bun-linux-aarch64.zip" ;; \
+	  darwin-x64)   BUN_ZIP="bun-darwin-x64.zip" ;; \
+	  darwin-arm64) BUN_ZIP="bun-darwin-aarch64.zip" ;; \
+	  windows-x64)  BUN_ZIP="bun-windows-x64.zip" ;; \
+	  *) echo "  Error: no Bun binary for $(PLATFORM)-$(ARCH_NAME)"; exit 1 ;; \
+	esac; \
+	URL="https://github.com/oven-sh/bun/releases/latest/download/$$BUN_ZIP"; \
+	echo "  Downloading: $$URL"; \
+	curl -fsSL "$$URL" -o $(DEPS_DIR)/bun-download.zip
+	@cd $(DEPS_DIR) && unzip -oq bun-download.zip && \
+	  mv bun-*/bun $(BUN_BIN) && \
+	  rmdir bun-* 2>/dev/null || true; \
+	  chmod +x $(BUN_BIN)
+	@rm -f $(DEPS_DIR)/bun-download.zip
 	@echo "  ✓ Bun $$( $(BUN_BIN) --version) installed at $(BUN_DIR)"
 	@echo "  Tip: add $(BUN_DIR)/bin to PATH to use system-wide"
 
