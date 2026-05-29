@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
 
-import Spinner from "ink-spinner";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -73,7 +72,8 @@ export const App: React.FC<AppProps> = (props) => {
     props.bannerText ? [{ type: "banner", text: props.bannerText }] : []
   );
   const [isRunning, setIsRunning] = useState(false);
-  const [pendingLines, setPendingLines] = useState<string[]>([]);
+  const [spinFrame, setSpinFrame] = useState(0);
+  const SPIN_FRAMES = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
   const [liveTail, setLiveTail] = useState("");
   const [currentToolName, setCurrentToolName] = useState("");
   const [elapsedSecs, setElapsedSecs] = useState(0);
@@ -90,9 +90,6 @@ export const App: React.FC<AppProps> = (props) => {
   const replStartCwdRef = useRef(process.cwd());
   const fastModelRef = useRef(props.fastModel);
   const reasoningModelRef = useRef(process.env["ATLAS_REASONING_MODEL"]);
-  const lineQueueRef = useRef<Array<{ text: string; ts: number }>>([]);
-  const catchUpRef = useRef(false);
-  const catchUpExitSinceRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -106,40 +103,8 @@ export const App: React.FC<AppProps> = (props) => {
   }, [isRunning]);
 
   useEffect(() => {
-    if (!isRunning) return;
-    const ENTER_QUEUE_DEPTH = 8;
-    const ENTER_OLDEST_AGE_MS = 120;
-    const EXIT_QUEUE_DEPTH = 2;
-    const EXIT_OLDEST_AGE_MS = 40;
-    const EXIT_HOLD_MS = 250;
-
-    const id = setInterval(() => {
-      const lineQueue = lineQueueRef.current;
-      if (lineQueue.length === 0) return;
-      const now = Date.now();
-      const oldest = lineQueue[0]?.ts ?? now;
-      const age = now - oldest;
-      if (!catchUpRef.current) {
-        if (lineQueue.length >= ENTER_QUEUE_DEPTH || age >= ENTER_OLDEST_AGE_MS) {
-          catchUpRef.current = true;
-          catchUpExitSinceRef.current = null;
-        }
-      } else {
-        if (lineQueue.length <= EXIT_QUEUE_DEPTH && age <= EXIT_OLDEST_AGE_MS) {
-          if (catchUpExitSinceRef.current === null) catchUpExitSinceRef.current = now;
-          if (now - catchUpExitSinceRef.current >= EXIT_HOLD_MS) {
-            catchUpRef.current = false;
-            catchUpExitSinceRef.current = null;
-          }
-        } else {
-          catchUpExitSinceRef.current = null;
-        }
-      }
-      const toDrain = catchUpRef.current ? lineQueue.splice(0) : lineQueue.splice(0, 1);
-      if (toDrain.length > 0) {
-        setPendingLines(prev => [...prev, ...toDrain.map(l => l.text)]);
-      }
-    }, 50);
+    if (!isRunning) { setSpinFrame(0); return; }
+    const id = setInterval(() => setSpinFrame(f => (f + 1) % 10), 500);
     return () => clearInterval(id);
   }, [isRunning]);
 
@@ -202,11 +167,7 @@ export const App: React.FC<AppProps> = (props) => {
     const controller = new AbortController();
     runningControllerRef.current = controller;
     setIsRunning(true);
-    setPendingLines([]);
     setLiveTail("");
-    lineQueueRef.current = [];
-    catchUpRef.current = false;
-    catchUpExitSinceRef.current = null;
     let rawSource = "";
     let committedLen = 0;
 
@@ -235,27 +196,19 @@ export const App: React.FC<AppProps> = (props) => {
           if (lastNl >= committedLen) {
             const newComplete = rawSource.slice(committedLen, lastNl + 1);
             committedLen = lastNl + 1;
-            const lines = newComplete.split("\n");
-            const now = Date.now();
-            for (const line of lines) {
-              if (line !== "") lineQueueRef.current.push({ text: line, ts: now });
-            }
+            // Commit completed lines directly to Static — never goes through dynamic area
+            setHistory(h => [...h, { type: "assistant", text: newComplete.replace(/\n$/, "") }]);
           }
-          const tail = rawSource.slice(committedLen);
-          setLiveTail(tail);
+          setLiveTail(rawSource.slice(committedLen));
         },
       });
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
-      if (rawSource.length > committedLen) {
-        lineQueueRef.current.push({ text: rawSource.slice(committedLen), ts: Date.now() });
+      // Commit any remaining tail (partial line without trailing \n)
+      const tail = rawSource.slice(committedLen);
+      if (tail.trim()) {
+        setHistory(h => [...h, { type: "assistant", text: tail }]);
       }
-      lineQueueRef.current.splice(0);
-      if (rawSource.trim()) {
-        setHistory(h => [...h, { type: "assistant", text: rawSource }]);
-      }
-      setPendingLines([]);
       setLiveTail("");
-      lineQueueRef.current = [];
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
@@ -621,11 +574,6 @@ export const App: React.FC<AppProps> = (props) => {
           </Box>
         )}
       </Static>
-      {pendingLines.length > 0 && (
-        <Box flexDirection="column">
-          {pendingLines.map((line, i) => <Text key={i}>{line}</Text>)}
-        </Box>
-      )}
       {liveTail && (
         <Box>
           <Text>{liveTail}</Text>
@@ -633,7 +581,7 @@ export const App: React.FC<AppProps> = (props) => {
       )}
       {isRunning && (
         <Box>
-          <Text color="cyan"><Spinner /></Text>
+          <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
           <Text color="gray"> Working · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${currentToolName}` : ""} · esc to interrupt</Text>
         </Box>
       )}
