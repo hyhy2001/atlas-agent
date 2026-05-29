@@ -130,20 +130,27 @@ install-bun:
 	@echo "  ✓ Bun $$( $(BUN_BIN) --version) installed at $(BUN_DIR)"
 	@echo "  Tip: add $(BUN_DIR)/bin to PATH to use system-wide"
 
-## deps: Install npm dependencies (uses bun install — respects all deps regardless of NODE_ENV)
+## deps: Install npm dependencies (tries bun first, falls back to npm)
 deps:
-	@echo "Installing npm dependencies via bun..."
-	@SKIP_BINARY_BUILD=1 $(BUN) install
-	@if [ ! -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
+	@echo "Installing npm dependencies..."
+	@echo "  Using: $(BUN) install"
+	@if SKIP_BINARY_BUILD=1 $(BUN) install --no-summary 2>&1 && [ -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
+	  echo "  ✓ Installed via bun"; \
+	else \
 	  echo ""; \
-	  echo "  ✗ TypeScript still missing at node_modules/typescript/bin/tsc"; \
-	  echo "    Diagnose:"; \
-	  echo "      ls -la node_modules/typescript/ 2>&1"; \
-	  echo "      cat package.json | grep -A2 devDep"; \
-	  echo "      $(BUN) install"; \
-	  exit 1; \
+	  echo "  bun install failed or didn't create node_modules. Falling back to npm..."; \
+	  echo "  Using: $(NPM) install --include=dev --legacy-peer-deps"; \
+	  rm -rf node_modules; \
+	  SKIP_BINARY_BUILD=1 NODE_ENV=development $(NPM) install --include=dev --legacy-peer-deps; \
+	  if [ ! -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
+	    echo ""; \
+	    echo "  ✗ Both bun and npm failed to install typescript."; \
+	    echo "    Run manually:  $(NPM) install --include=dev"; \
+	    echo "    Then check:    ls node_modules/typescript/bin/"; \
+	    exit 1; \
+	  fi; \
+	  echo "  ✓ Installed via npm"; \
 	fi
-	@echo "  ✓ Dependencies installed"
 
 ## build: Compile TypeScript
 build:
