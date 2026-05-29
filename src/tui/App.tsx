@@ -380,19 +380,20 @@ export const App: React.FC<AppProps> = (props) => {
     }
     try {
       const { execSync } = await import("node:child_process");
-      const { statSync } = await import("node:fs");
       const excludes = "-not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/bin/*' -not -path '*/release/*'";
-      const raw = execSync(
-        `find . \\( -type f -o -type d \\) ${excludes} 2>/dev/null | head -2000`,
+      // Directories first (with trailing slash), then files — no per-entry statSync
+      const dirRaw = execSync(
+        `find . -type d ${excludes} 2>/dev/null | head -1000`,
         { encoding: "utf8", cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }
       ).trim();
-      if (!raw) return [];
-      const entries = raw.split("\n")
-        .map(f => f.replace(/^\.\//, ""))
-        .filter(f => f && f !== ".")
-        .map(f => {
-          try { return statSync(f).isDirectory() ? f + "/" : f; } catch { return f; }
-        });
+      const fileRaw = execSync(
+        `find . -type f ${excludes} 2>/dev/null | head -2000`,
+        { encoding: "utf8", cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }
+      ).trim();
+      const dirs = dirRaw ? dirRaw.split("\n").map(f => f.replace(/^\.\//, "")).filter(f => f && f !== ".").map(f => f + "/") : [];
+      const files = fileRaw ? fileRaw.split("\n").map(f => f.replace(/^\.\//, "")).filter(Boolean) : [];
+      const entries = [...dirs, ...files];
+      if (entries.length === 0) return [];
       fileListCacheRef.current = entries;
       fileListCacheTimeRef.current = now;
       return entries;
