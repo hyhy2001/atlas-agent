@@ -527,11 +527,12 @@ export const App: React.FC<AppProps> = (props) => {
         if (nested) {
           nestedCallCountRef.current++;
           const n = nestedCallCountRef.current;
-          // Show first 5 nested calls; suppress the rest (done summary shows total)
+          // Show first 5 nested calls; emit a single "more" line on the 6th, suppress rest.
+          // Final total is shown in the Done summary line ("Done (N tool uses · ...)")
           if (n <= 5) {
             setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
           } else if (n === 6) {
-            setHistory(h => [...h, { type: "tool_call", text: "…", toolName: "more", nested }]);
+            setHistory(h => [...h, { type: "tool_call", text: "more tool calls hidden — see Done summary", toolName: "more", nested }]);
           }
           return;
         }
@@ -1306,7 +1307,12 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
                 <Text>{entry.text}</Text>
               </Box>
             )}
-            {entry.type === "tool_call" && (
+            {entry.type === "tool_call" && entry.toolName === "more" && (
+              <Box paddingLeft={entry.nested ? 2 : 0}>
+                <Text color="gray" dimColor>{"  … " + (entry.text || "more")}</Text>
+              </Box>
+            )}
+            {entry.type === "tool_call" && entry.toolName !== "more" && (
               <Box paddingLeft={entry.nested ? 2 : 0}>
                 <Text color={entry.isError ? "red" : "green"}>{"● "}</Text>
                 <Text bold>{formatToolName(entry.toolName ?? "tool")}</Text>
