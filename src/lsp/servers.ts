@@ -1,17 +1,24 @@
 import { promisify } from "node:util";
 import { exec } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import which from "which";
+import { paths } from "../paths.js";
 
 const execAsync = promisify(exec);
+
+function lspDir(): string {
+  return path.join(paths.bin(), "lsp");
+}
 
 export interface ServerConfig {
   language: string;
   extensions: string[];
   command: string;
   args: string[];
-  installCmd?: string;
+  installType?: "npm" | "pip";
+  npmPackages?: string[];
+  pipPackage?: string;
   installHint?: string;
   rootMarkers: string[];
 }
@@ -22,7 +29,8 @@ export const SERVERS: ServerConfig[] = [
     extensions: [".ts", ".tsx", ".mts", ".cts"],
     command: "typescript-language-server",
     args: ["--stdio"],
-    installCmd: "npm install -g typescript-language-server typescript",
+    installType: "npm",
+    npmPackages: ["typescript-language-server", "typescript"],
     rootMarkers: ["tsconfig.json", "package.json", ".git"],
   },
   {
@@ -30,7 +38,8 @@ export const SERVERS: ServerConfig[] = [
     extensions: [".js", ".jsx", ".mjs", ".cjs"],
     command: "typescript-language-server",
     args: ["--stdio"],
-    installCmd: "npm install -g typescript-language-server typescript",
+    installType: "npm",
+    npmPackages: ["typescript-language-server", "typescript"],
     rootMarkers: ["package.json", ".git"],
   },
   {
@@ -38,7 +47,8 @@ export const SERVERS: ServerConfig[] = [
     extensions: [".py", ".pyi"],
     command: "pylsp",
     args: [],
-    installCmd: "pip install python-lsp-server",
+    installType: "pip",
+    pipPackage: "python-lsp-server",
     rootMarkers: ["pyproject.toml", "setup.py", ".git"],
   },
   {
@@ -84,24 +94,53 @@ export function findProjectRoot(filePath: string, markers: string[]): string {
   }
 }
 
-export interface InstallResult { ok: boolean; installed?: boolean; error?: string }
+export async function resolveServerCommand(cfg: ServerConfig): Promise<string | null> {
+  const dir = lspDir();
+  const npmLocal = path.join(dir, "node_modules", ".bin", cfg.command);
+  if (existsSync(npmLocal)) return npmLocal;
+  const pipLocal = path.join(dir, "pyvenv", "bin", cfg.command);
+  if (existsSync(pipLocal)) return pipLocal;
+  try {
+    const resolved = await which(cfg.command);
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+export interface InstallResult { ok: boolean; command?: string; installed?: boolean; error?: string }
 
 export async function ensureServerInstalled(cfg: ServerConfig): Promise<InstallResult> {
-  try {
-    await which(cfg.command);
-    return { ok: true, installed: false };
-  } catch {
-    // not found
-  }
-  if (!cfg.installCmd) {
+  const existing = await resolveServerCommand(cfg);
+  if (existing) return { ok: true, command: existing, installed: false };
+
+  if (!cfg.installType) {
     return { ok: false, error: cfg.installHint ?? `${cfg.command} not found and no auto-install available` };
   }
+
+  const dir = lspDir();
   try {
-    await execAsync(cfg.installCmd, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
-    await which(cfg.command);
-    return { ok: true, installed: true };
+    mkdirSync(dir, { recursive: true });
+    if (cfg.installType === "npm") {
+      const pkgs = (cfg.npmPackages ?? []).join(" ");
+      await execAsync(`npm install --prefix "${dir}" ${pkgs}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+    } else if (cfg.installType === "pip") {
+      const venv = path.join(dir, "pyvenv");
+      if (!existsSync(path.join(venv, "bin", "pip"))) {
+        await execAsync(`python3 -m venv "${venv}"`, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
+      }
+      await execAsync(`"${path.join(venv, "bin", "pip")}" install ${cfg.pipPackage}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+    }
+    const resolved = await resolveServerCommand(cfg);
+    if (!resolved) {
+      return { ok: false, error: `Installed ${cfg.command} but binary not found in ${dir}` };
+    }
+    return { ok: true, command: resolved, installed: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Failed to install ${cfg.command}: ${msg}\nTry manually: ${cfg.installCmd}` };
+    const manualCmd = cfg.installType === "npm"
+      ? `npm install --prefix "${dir}" ${(cfg.npmPackages ?? []).join(" ")}`
+      : `python3 -m venv "${path.join(dir, "pyvenv")}" && "${path.join(dir, "pyvenv", "bin", "pip")}" install ${cfg.pipPackage}`;
+    return { ok: false, error: `Failed to install ${cfg.command}: ${msg}\nTry manually: ${manualCmd}` };
   }
 }

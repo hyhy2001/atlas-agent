@@ -33,10 +33,10 @@ export class LspManager {
     if (cached && !cached.conn.isClosed()) return { entry: cached, cfg };
 
     const install = await ensureServerInstalled(cfg);
-    if (!install.ok) throw new Error(install.error ?? "Install failed");
-    if (install.installed) this.installLog.push(`Installed ${cfg.command}`);
+    if (!install.ok || !install.command) throw new Error(install.error ?? "Install failed");
+    if (install.installed) this.installLog.push(`Installed ${cfg.command} into .atlas/bin/lsp`);
 
-    const proc = spawn(cfg.command, cfg.args, { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(install.command, cfg.args, { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
     const conn = new JsonRpcConnection(proc);
 
     const rootUri = pathToFileURL(root).toString();
