@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -19,6 +19,17 @@ import { PlanMode } from "../agent/plan_mode.js";
 import { recordEvent } from "../telemetry.js";
 import { createCompleter } from "../completion.js";
 import { isMultilineStart, isMultilineEnd, shouldContinue, stripContinuation } from "../multiline.js";
+import {
+  formatTokenCount,
+  formatTimeAgo,
+} from "./format.js";
+import { SpinnerLine } from "./components/SpinnerLine.js";
+import { MessageList } from "./components/MessageList.js";
+import { QuestionOverlay } from "./components/QuestionOverlay.js";
+import { SubagentTree } from "./components/SubagentTree.js";
+import { PromptInput } from "./components/PromptInput.js";
+import { THEMES, ThemeContext, type ThemeName } from "./theme.js";
+import type { HistoryEntry, OverlayItem, AgentTask } from "./types.js";
 
 interface AppProps {
   provider: OpenAIProvider;
@@ -35,15 +46,6 @@ interface AppProps {
   startInPlanMode?: boolean;
   bannerText?: string;
   mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
-}
-
-interface HistoryEntry {
-  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full" | "subagent_done";
-  text: string;
-  fullText?: string;
-  toolName?: string;
-  isError?: boolean;
-  nested?: boolean;
 }
 
 const STATUS_VERBS = [
@@ -63,14 +65,8 @@ const TIPS = [
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
-  "init", "diff", "undo", "agent", "agents", "model", "doctor", "worktree", "trust", "exit", "quit",
+  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "exit", "quit",
 ];
-
-interface OverlayItem {
-  label: string;
-  sublabel?: string;
-  value: string;
-}
 
 interface AtSuggestion { path: string; indices?: number[] }
 
@@ -82,111 +78,6 @@ const PERM_MODE_LABELS: Record<PermMode, string> = {
   plan: "plan only",
 };
 
-interface AgentTask {
-  id: string;
-  agent: string;
-  status: "running" | "done" | "error";
-  startedAt: number;
-  durationMs?: number;
-  toolUses?: number;
-  tokens?: number;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
-function formatElapsed(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
-}
-
-function formatTimeAgo(isoString: string): string {
-  const now = Date.now();
-  const then = new Date(isoString).getTime();
-  const secs = Math.floor((now - then) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function formatToolName(name: string): string {
-  const map: Record<string, string> = {
-    bash: "Bash",
-    read_file: "Read",
-    write_file: "Write",
-    edit_file: "Edit",
-    grep: "Search",
-    glob: "Find",
-    list_directory: "List",
-    web_fetch: "Fetch",
-    git_status: "Git",
-    git_diff: "Git",
-    git_log: "Git",
-    git_commit: "Commit",
-    delegate: "Delegate",
-    delegate_parallel: "Delegate",
-    apply_patch: "Patch",
-    read_many_files: "Read",
-    todo_write: "Todo",
-    todo_read: "Todo",
-    memory_save: "Memory",
-    memory_read: "Memory",
-    memory_append: "Memory",
-    analyze_log: "Analyze",
-  };
-  return map[name] ?? name.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join("");
-}
-
-function formatToolResult(text: string, maxLines = 5): { preview: string; hidden: number } {
-  const lines = text.split("\n");
-  if (lines.length <= maxLines) return { preview: text, hidden: 0 };
-  return {
-    preview: lines.slice(0, maxLines).join("\n"),
-    hidden: lines.length - maxLines,
-  };
-}
-
-const DIFF_MARKER = "__ATLAS_DIFF__";
-
-function isDiffOutput(text: string): boolean {
-  return text.startsWith(DIFF_MARKER);
-}
-
-interface DiffLine {
-  type: "header" | "hunk" | "add" | "remove" | "context" | "ellipsis";
-  lineNum?: number;
-  text: string;
-}
-
-function parseDiffOutput(text: string): { header: string; lines: DiffLine[] } {
-  const body = text.slice(DIFF_MARKER.length);
-  const [header, ...rest] = body.split("\n");
-  const lines: DiffLine[] = [];
-  for (const raw of rest) {
-    if (raw.startsWith("@@HUNK@@")) {
-      lines.push({ type: "hunk", text: raw.slice("@@HUNK@@".length) });
-    } else if (raw.startsWith("…@@")) {
-      lines.push({ type: "ellipsis", text: raw.slice(3) });
-    } else {
-      const sep = raw.indexOf("@@");
-      if (sep === -1) continue;
-      const marker = raw[0];
-      const lineNum = parseInt(raw.slice(1, sep)) || 0;
-      const content = raw.slice(sep + 2);
-      const type = marker === "+" ? "add" : marker === "-" ? "remove" : "context";
-      lines.push({ type, lineNum, text: content });
-    }
-  }
-  return { header, lines };
-}
-
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
@@ -197,6 +88,11 @@ export const App: React.FC<AppProps> = (props) => {
     props.bannerText ? [{ type: "banner", text: props.bannerText }] : []
   );
   const [isRunning, setIsRunning] = useState(false);
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const [outputStyle, setOutputStyle] = useState<"default" | "compact" | "verbose">("default");
+  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const theme = THEMES[themeName];
   const [spinFrame, setSpinFrame] = useState(0);
   const SPIN_FRAMES = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
   const [liveTail, setLiveTail] = useState("");
@@ -246,6 +142,12 @@ export const App: React.FC<AppProps> = (props) => {
   const agentTaskIdRef = useRef(0);
   const nestedCallCountRef = useRef(0);
   const pendingAtQueryRef = useRef<string | null>(null);
+  const inputHistoryRef = useRef<string[]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const savedInputRef = useRef<string>("");
+  const pasteNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queuedMessageRef = useRef<string | null>(null);
+  const handleSubmitRef = useRef<(value: string) => Promise<void>>(async () => {});
 
   useEffect(() => {
     import("node:child_process").then(({ execSync }) => {
@@ -348,7 +250,7 @@ export const App: React.FC<AppProps> = (props) => {
     const allCmds = [
       "/help","/save","/sessions","/load","/resume","/clear","/context",
       "/plan","/execute","/compact","/cost","/stats","/init","/bg",
-      "/diff","/undo","/agent","/agents","/model","/doctor","/mcp",
+      "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/mcp",
       "/worktree","/trust",
       ...(props.commands ?? []).map(c => `/${c.name}`),
     ];
@@ -734,10 +636,64 @@ export const App: React.FC<AppProps> = (props) => {
       }
       return true;
     }
+    if (value === "/output") {
+      const chosen = await new Promise<string>((resolve) => {
+        setQuestionOverlay({
+          question: "Output style",
+          items: [
+            { label: "default", sublabel: "5 lines preview per tool result", value: "default" },
+            { label: "compact", sublabel: "1-line summary per tool result", value: "compact" },
+            { label: "verbose", sublabel: "Full output, no truncation", value: "verbose" },
+          ],
+          selectedIndex: ["default", "compact", "verbose"].indexOf(outputStyle),
+          resolve,
+        });
+      });
+      if (chosen === "default" || chosen === "compact" || chosen === "verbose") {
+        setOutputStyle(chosen);
+        addSystem(`Output style: ${chosen}`);
+      }
+      return true;
+    }
+    if (value === "/theme") {
+      const chosen = await new Promise<string>((resolve) => {
+        setQuestionOverlay({
+          question: "Theme",
+          items: [
+            { label: "dark", sublabel: "Cyan accents (default)", value: "dark" },
+            { label: "light", sublabel: "Blue accents", value: "light" },
+            { label: "monokai", sublabel: "Magenta + yellow", value: "monokai" },
+            { label: "solarized", sublabel: "Muted blue + cyan", value: "solarized" },
+          ],
+          selectedIndex: ["dark", "light", "monokai", "solarized"].indexOf(themeName),
+          resolve,
+        });
+      });
+      if (chosen === "dark" || chosen === "light" || chosen === "monokai" || chosen === "solarized") {
+        setThemeName(chosen);
+        addSystem(`Theme: ${chosen}`);
+      }
+      return true;
+    }
     if (value === "/cost") {
       const inCost = (tokens.input / 1_000_000) * 1.5;
       const outCost = (tokens.output / 1_000_000) * 15.0;
-      addSystem(`Token usage this session:\n  Input:  ${formatTokenCount(tokens.input)} tokens  (~$${inCost.toFixed(3)})\n  Output: ${formatTokenCount(tokens.output)} tokens  (~$${outCost.toFixed(3)})\n  Total:  ${formatTokenCount(tokens.input + tokens.output)} tokens  (~$${(inCost + outCost).toFixed(3)})`);
+      const total = tokens.input + tokens.output;
+      const mainModel = props.provider.getModel();
+      const fastModel = fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? mainModel;
+      const reasoningModel = reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? mainModel;
+      const lines = [
+        `Token usage this session:`,
+        `  Input:     ${formatTokenCount(tokens.input)} tokens  (~$${inCost.toFixed(4)})`,
+        `  Output:    ${formatTokenCount(tokens.output)} tokens  (~$${outCost.toFixed(4)})`,
+        `  Total:     ${formatTokenCount(total)} tokens  (~$${(inCost + outCost).toFixed(4)})`,
+        ``,
+        `Model tiers:`,
+        `  leader:    ${mainModel}`,
+        `  fast:      ${fastModel}`,
+        `  reasoning: ${reasoningModel}`,
+      ];
+      addSystem(lines.join("\n"));
       return true;
     }
     if (value === "/stats" || value.startsWith("/stats ")) {
@@ -975,7 +931,32 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       return true;
     }
     if (value === "/doctor") {
-      await runPrompt("Run diagnostics for this atlas-agent project and report any setup issues.");
+      const checks: string[] = [];
+      const baseUrl = process.env["ATLAS_BASE_URL"] ?? (props.provider as any)._baseUrl ?? "(not exposed)";
+      const authToken = process.env["ATLAS_AUTH_TOKEN"] ?? "";
+      checks.push(`Config:`);
+      checks.push(`  ATLAS_BASE_URL:    ${baseUrl ? "✓ set" : "✗ missing"}`);
+      checks.push(`  ATLAS_AUTH_TOKEN:  ${authToken ? "✓ set" : "✗ missing"}`);
+      checks.push(`  Model:             ${props.provider.getModel() || "✗ not set"}`);
+      checks.push(``);
+      const mcpList = props.mcpStatus ?? [];
+      checks.push(`MCP servers (${mcpList.length}):`);
+      if (mcpList.length === 0) {
+        checks.push(`  (none configured)`);
+      } else {
+        for (const s of mcpList) {
+          const icon = s.status === "connected" ? "✓" : "✗";
+          const detail = s.status === "connected" ? `${s.toolCount} tools` : (s.error ?? "failed");
+          checks.push(`  ${icon} ${s.name}  — ${detail}`);
+        }
+      }
+      checks.push(``);
+      checks.push(`Tools: ${props.totalToolCount ?? props.toolRegistry.getAll().length} registered`);
+      checks.push(``);
+      checks.push(`Session: ${sessionIdRef.current}`);
+      checks.push(`  Messages: ${messagesRef.current.length}`);
+      checks.push(`  Tokens:   ${formatTokenCount(tokens.input + tokens.output)}`);
+      addSystem(checks.join("\n"));
       return true;
     }
     if (value === "/worktree" || value.startsWith("/worktree ")) {
@@ -1045,6 +1026,10 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     if (!value.trim()) return;
     const trimmed = value.trim();
     setInput("");
+    if (trimmed && (inputHistoryRef.current.length === 0 || inputHistoryRef.current[inputHistoryRef.current.length - 1] !== trimmed)) {
+      inputHistoryRef.current.push(trimmed);
+    }
+    historyIndexRef.current = -1;
 
     if (multiline) {
       if ((multiline.mode === "ticks" && isMultilineEnd(trimmed)) || (multiline.mode === "slash" && !shouldContinue(trimmed))) {
@@ -1086,6 +1071,21 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     if (trimmed.startsWith("/") && await handleCommand(trimmed)) return;
     await runPrompt(trimmed);
   };
+
+  handleSubmitRef.current = handleSubmit;
+
+  useEffect(() => {
+    queuedMessageRef.current = queuedMessage;
+  }, [queuedMessage]);
+
+  useEffect(() => {
+    if (!isRunning && queuedMessageRef.current) {
+      const msg = queuedMessageRef.current;
+      queuedMessageRef.current = null;
+      setQueuedMessage(null);
+      handleSubmitRef.current(msg);
+    }
+  }, [isRunning]);
 
   useInput((inputChar, key) => {
     if (questionOverlay) {
@@ -1160,6 +1160,14 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         ctrlCPressedAtRef.current = now;
         addSystem("(Press Ctrl+C again to exit)");
       }
+      return;
+    }
+
+    if (isRunning && key.return && input.trim()) {
+      const queued = input.trim();
+      queuedMessageRef.current = queued;
+      setQueuedMessage(queued);
+      setInput("");
       return;
     }
 
@@ -1263,12 +1271,45 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       }
     }
 
+    // Up arrow — history back
+    if (key.upArrow && slashCmds.length === 0 && atSuggestions.length === 0) {
+      const hist = inputHistoryRef.current;
+      if (hist.length === 0) return;
+      if (historyIndexRef.current === -1) {
+        savedInputRef.current = input;
+        historyIndexRef.current = hist.length - 1;
+      } else if (historyIndexRef.current > 0) {
+        historyIndexRef.current--;
+      }
+      setInput(hist[historyIndexRef.current]);
+      return;
+    }
+    // Down arrow — history forward
+    if (key.downArrow && slashCmds.length === 0 && atSuggestions.length === 0) {
+      if (historyIndexRef.current === -1) return;
+      if (historyIndexRef.current < inputHistoryRef.current.length - 1) {
+        historyIndexRef.current++;
+        setInput(inputHistoryRef.current[historyIndexRef.current]);
+      } else {
+        historyIndexRef.current = -1;
+        setInput(savedInputRef.current);
+      }
+      return;
+    }
+
     // Skip other special keys
     if (key.escape || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.pageDown || key.pageUp || key.meta) return;
 
     // Regular character — append
     if (inputChar && !key.ctrl) {
+      historyIndexRef.current = -1;
       const newInput = input + inputChar;
+      if (inputChar.length >= 200 || inputChar.split("\n").length >= 3) {
+        const lineCount = inputChar.split("\n").length;
+        setPasteNotice(`Pasted ${lineCount} line${lineCount > 1 ? "s" : ""}`);
+        if (pasteNoticeTimerRef.current) clearTimeout(pasteNoticeTimerRef.current);
+        pasteNoticeTimerRef.current = setTimeout(() => setPasteNotice(null), 2000);
+      }
       setInput(newInput);
       setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
@@ -1289,265 +1330,52 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
   });
 
   return (
-    <Box flexDirection="column">
-      <Static items={history}>
-        {(entry, index) => (
-          <Box key={index} flexDirection="column" marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
-            {entry.type === "banner" && (
-              <Text>{entry.text}</Text>
-            )}
-            {entry.type === "user" && (
-              <Box marginTop={1}>
-                <Text color="cyan" bold>{"> "}</Text>
-                <Text bold>{entry.text}</Text>
-              </Box>
-            )}
-            {entry.type === "assistant" && (
-              <Box paddingLeft={0}>
-                <Text>{entry.text}</Text>
-              </Box>
-            )}
-            {entry.type === "tool_call" && entry.toolName === "more" && (
-              <Box paddingLeft={entry.nested ? 2 : 0}>
-                <Text color="gray" dimColor>{"  … " + (entry.text || "more")}</Text>
-              </Box>
-            )}
-            {entry.type === "tool_call" && entry.toolName !== "more" && (
-              <Box paddingLeft={entry.nested ? 2 : 0}>
-                <Text color={entry.isError ? "red" : "green"}>{"● "}</Text>
-                <Text bold>{formatToolName(entry.toolName ?? "tool")}</Text>
-                {entry.text && <Text color="gray" dimColor>{"(" + entry.text + ")"}</Text>}
-              </Box>
-            )}
-            {entry.type === "tool_result" && isDiffOutput(entry.text) && (() => {
-              const { header, lines } = parseDiffOutput(entry.text);
-              const indent = entry.nested ? 4 : 2;
-              const maxLines = 15;
-              const visibleLines = lines.slice(0, maxLines);
-              const hiddenCount = lines.length - visibleLines.length;
-              return (
-                <Box flexDirection="column" paddingLeft={indent}>
-                  <Box>
-                    <Text color="green">{"⎿  "}</Text>
-                    <Text bold>{header}</Text>
-                  </Box>
-                  {visibleLines.map((line, i) => {
-                    const lineNumStr = line.lineNum !== undefined ? String(line.lineNum).padStart(4, " ") : "    ";
-                    if (line.type === "add") {
-                      return (
-                        <Box key={i} paddingLeft={3}>
-                          <Text color="gray" dimColor>{lineNumStr + " "}</Text>
-                          <Text color="green">+ {line.text}</Text>
-                        </Box>
-                      );
-                    }
-                    if (line.type === "remove") {
-                      return (
-                        <Box key={i} paddingLeft={3}>
-                          <Text color="gray" dimColor>{lineNumStr + " "}</Text>
-                          <Text color="red">- {line.text}</Text>
-                        </Box>
-                      );
-                    }
-                    if (line.type === "context") {
-                      return (
-                        <Box key={i} paddingLeft={3}>
-                          <Text color="gray" dimColor>{lineNumStr + "   " + line.text}</Text>
-                        </Box>
-                      );
-                    }
-                    if (line.type === "hunk") {
-                      return (
-                        <Box key={i} paddingLeft={3}>
-                          <Text color="cyan" dimColor>{line.text}</Text>
-                        </Box>
-                      );
-                    }
-                    return (
-                      <Box key={i} paddingLeft={3}>
-                        <Text color="gray" dimColor>{line.text}</Text>
-                      </Box>
-                    );
-                  })}
-                  {hiddenCount > 0 && (
-                    <Box paddingLeft={3}>
-                      <Text color="gray" dimColor>{"  … +" + hiddenCount + " more lines"}</Text>
-                    </Box>
-                  )}
-                </Box>
-              );
-            })()}
-            {entry.type === "tool_result" && !isDiffOutput(entry.text) && (() => {
-              const { preview, hidden } = formatToolResult(entry.text);
-              const lines = preview.split("\n");
-              const indent = entry.nested ? 4 : 2;
-              return (
-                <Box flexDirection="column" paddingLeft={indent}>
-                  {lines.map((line, i) => (
-                    <Box key={i}>
-                      <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
-                      <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>{line}</Text>
-                    </Box>
-                  ))}
-                  {hidden > 0 && (
-                    <Box>
-                      <Text color="gray" dimColor>{"   … +" + hidden + " lines (ctrl+o to expand)"}</Text>
-                    </Box>
-                  )}
-                </Box>
-              );
-            })()}
-            {entry.type === "tool_result_full" && (
-              <Box flexDirection="column" paddingLeft={entry.nested ? 4 : 2}>
-                {entry.text.split("\n").map((line, i) => (
-                  <Box key={i}>
-                    <Text color="green">{i === 0 ? "⎿  " : "   "}</Text>
-                    <Text color={entry.isError ? "red" : "gray"} dimColor={!entry.isError}>{line}</Text>
-                  </Box>
-                ))}
-              </Box>
-            )}
-            {entry.type === "subagent_done" && (
-              <Box paddingLeft={2}>
-                <Text color="gray" dimColor>{"  ⎿  " + entry.text}</Text>
-              </Box>
-            )}
-            {entry.type === "system" && (
-              <Text color="cyan" dimColor>{entry.text}</Text>
-            )}
+    <ThemeContext.Provider value={theme}>
+      <Box flexDirection="column">
+        <MessageList history={history} outputStyle={outputStyle} />
+        {liveTokens > 80000 && (
+          <Box paddingX={1}>
+            <Text color="yellow">{"⚠ "}</Text>
+            <Text color="yellow" dimColor>{"Context window >80% full — consider /compact to free space"}</Text>
           </Box>
         )}
-      </Static>
-      {questionOverlay && (
-        <Box flexDirection="column" marginBottom={1} borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={overlayWidth}>
-          <Box marginBottom={1}>
-            <Text bold color="cyan">{"? "}</Text>
-            <Text bold>{questionOverlay.question}</Text>
-          </Box>
-          {questionOverlay.items.map((item, i) => (
-            <Box key={i} flexDirection="column">
-              <Box>
-                <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"}>
-                  {i === questionOverlay.selectedIndex ? "❯ " : "  "}
-                </Text>
-                <Text color={i === questionOverlay.selectedIndex ? "cyan" : "gray"} bold={i === questionOverlay.selectedIndex}>
-                  {item.label}
-                </Text>
-              </Box>
-              {item.sublabel && (
-                <Box paddingLeft={2}>
-                  <Text color="gray" dimColor>{item.sublabel}</Text>
-                </Box>
-              )}
-            </Box>
-          ))}
-          <Box marginTop={1}>
-            <Text color="gray" dimColor>↑↓ navigate  ↵ select{questionOverlay.items.length <= 4 ? "  1-4 quick pick" : ""}  Esc cancel</Text>
-          </Box>
-        </Box>
-      )}
-      {liveTail && (
-        <Box>
-          <Text>{liveTail}</Text>
-        </Box>
-      )}
-      {isRunning && (
-        <Box flexDirection="column">
+        <QuestionOverlay overlay={questionOverlay} width={overlayWidth} />
+        {liveTail && (
           <Box>
-            <Text color="cyan">{SPIN_FRAMES[spinFrame]}</Text>
-            <Text color="gray"> {statusVerb} · {formatElapsed(elapsedSecs)}{liveTokens > 0 ? ` · ↓ ${formatTokenCount(liveTokens)} tokens` : ""}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
+            <Text>{liveTail}</Text>
           </Box>
-          {reasoningPreview && (
-            <Box paddingLeft={2}>
-              <Text color="magenta" dimColor>{"💭 " + reasoningPreview}</Text>
-            </Box>
-          )}
-          {tip && (
-            <Box>
-              <Text color="gray" dimColor>  Tip: {tip}</Text>
-            </Box>
-          )}
-        </Box>
-      )}
-      {isRunning && agentTasks.some(t => t.status === "running") && (
-        <Box flexDirection="column" marginTop={0}>
-          {agentTasks.filter(t => t.status === "running").map(task => (
-            <Box key={task.id}>
-              <Text color="cyan">{"◯ "}</Text>
-              <Text color="cyan">{task.agent}</Text>
-              <Text color="gray" dimColor>
-                {`  ${formatElapsed(Math.floor((Date.now() - task.startedAt) / 1000))}`}
-              </Text>
-            </Box>
-          ))}
-        </Box>
-      )}
-      {!isRunning && (
-        <Box flexDirection="column" width={fullWidth}>
-          <Box>
-            <Text color="gray" dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 3 : 0)))}</Text>
-            {gitBranch && <Text color="gray" dimColor>{" " + gitBranch + " ─"}</Text>}
-          </Box>
-          <Box paddingX={1}>
-            <Text color="cyan" bold>{planActive ? "[plan] " : multiline ? "... " : "❯ "}</Text>
-            <Text>{input}</Text>
-            <Text color="gray">█</Text>
-          </Box>
-          {input.startsWith("/") && input.length >= 1 && (
-            <Box flexDirection="column" paddingX={2}>
-              {slashCmds.map((m, i) => (
-                <Text key={m} color={i === slashCmdIndex ? "cyan" : "gray"} dimColor={i !== slashCmdIndex}>
-                  {i === slashCmdIndex ? "› " : "  "}{m}
-                </Text>
-              ))}
-              {slashCmds.length > 0 && <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>}
-            </Box>
-          )}
-          {atSuggestions.length > 0 && (
-            <Box flexDirection="column" paddingX={2}>
-              {atSuggestions.map((item, i) => (
-                <Box key={item.path}>
-                  <Text color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
-                    {i === atSuggestionIndex ? "› " : "  "}
-                  </Text>
-                  {item.indices && item.indices.length > 0 ? (
-                    <Text>
-                      {item.path.split("").map((ch, ci) => (
-                        <Text key={ci} color={item.indices!.includes(ci) ? "cyan" : (i === atSuggestionIndex ? "white" : "gray")} bold={item.indices!.includes(ci)}>
-                          {ch}
-                        </Text>
-                      ))}
-                    </Text>
-                  ) : (
-                    <Text color={i === atSuggestionIndex ? "cyan" : "gray"} dimColor={i !== atSuggestionIndex}>
-                      {item.path}
-                    </Text>
-                  )}
-                </Box>
-              ))}
-              <Text color="gray" dimColor>  ↑↓ navigate  Tab · complete</Text>
-            </Box>
-          )}
-          <Box>
-            <Text color="gray" dimColor>{"─".repeat(fullWidth)}</Text>
-          </Box>
-          <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
-            <Text color="gray" dimColor>Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
-            <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>shift+tab · {PERM_MODE_LABELS[permMode]}</Text>
-          </Box>
-        </Box>
-      )}
-      {!isRunning && (
-        <Box paddingX={1}>
-          <Text color="gray" dimColor>{(() => {
-            const parts: string[] = [];
-            if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓`);
-            const m = props.provider.getModel();
-            if (m && m !== "all" && m !== "default") parts.push(m);
-            return parts.length > 0 ? parts.join("  ·  ") : "";
-          })()}</Text>
-        </Box>
-      )}
-    </Box>
+        )}
+        {isRunning && (
+          <SpinnerLine
+            spinFrame={spinFrame}
+            spinFrames={SPIN_FRAMES}
+            statusVerb={statusVerb}
+            elapsedSecs={elapsedSecs}
+            liveTokens={liveTokens}
+            currentToolName={currentToolName}
+            reasoningPreview={reasoningPreview}
+            tip={tip}
+          />
+        )}
+        {isRunning && <SubagentTree tasks={agentTasks} />}
+        {!isRunning && (
+          <PromptInput
+            fullWidth={fullWidth}
+            gitBranch={gitBranch}
+            planActive={planActive}
+            multiline={multiline}
+            input={input}
+            slashCmds={slashCmds}
+            slashCmdIndex={slashCmdIndex}
+            atSuggestions={atSuggestions}
+            atSuggestionIndex={atSuggestionIndex}
+            permMode={permMode}
+            permModeLabels={PERM_MODE_LABELS}
+            tokens={tokens}
+            modelName={props.provider.getModel()}
+          />
+        )}
+      </Box>
+    </ThemeContext.Provider>
   );
 };
