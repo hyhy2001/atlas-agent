@@ -200,14 +200,14 @@ export class MarkdownRenderer {
       const [, indent, , content] = ulMatch;
       const depth = Math.floor(indent.length / 2);
       const bullet = depth === 0 ? "•" : depth === 1 ? "◦" : "▪";
-      return indent + chalk.cyan(bullet) + " " + this.renderInline(content);
+      return indent + chalk.gray(bullet) + " " + this.renderInline(content);
     }
 
     // Ordered list item: "1. " or "1) "
     const olMatch = line.match(/^(\s*)(\d+)[.)]\s+(.*)$/);
     if (olMatch) {
       const [, indent, num, content] = olMatch;
-      return indent + chalk.cyan(num + ".") + " " + this.renderInline(content);
+      return indent + chalk.gray(num + ".") + " " + this.renderInline(content);
     }
 
     return this.renderInline(line);

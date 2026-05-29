@@ -1143,26 +1143,15 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
           )}
         </Box>
       )}
-      {agentTasks.length > 0 && (
+      {isRunning && agentTasks.some(t => t.status === "running") && (
         <Box flexDirection="column" marginTop={0}>
-          {agentTasks.map(task => (
+          {agentTasks.filter(t => t.status === "running").map(task => (
             <Box key={task.id}>
-              <Text color={task.status === "running" ? "cyan" : task.status === "done" ? "green" : "red"}>
-                {task.status === "running" ? "◯ " : "● "}
+              <Text color="cyan">{"◯ "}</Text>
+              <Text color="cyan">{task.agent}</Text>
+              <Text color="gray" dimColor>
+                {`  ${formatElapsed(Math.floor((Date.now() - task.startedAt) / 1000))}`}
               </Text>
-              <Text color={task.status === "running" ? "cyan" : "gray"}>
-                {task.agent}
-              </Text>
-              {task.status === "running" && (
-                <Text color="gray" dimColor>
-                  {`  ${formatElapsed(Math.floor((Date.now() - task.startedAt) / 1000))}`}
-                </Text>
-              )}
-              {task.status === "done" && task.durationMs !== undefined && (
-                <Text color="gray" dimColor>
-                  {`  ${formatElapsed(Math.floor(task.durationMs / 1000))} · ${task.toolUses ?? 0} tools`}
-                </Text>
-              )}
             </Box>
           ))}
         </Box>
