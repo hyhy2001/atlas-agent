@@ -34,10 +34,11 @@ interface AppProps {
   totalToolCount?: number;
   fastModel?: string;
   startInPlanMode?: boolean;
+  bannerText?: string;
 }
 
 interface HistoryEntry {
-  type: "user" | "assistant" | "system" | "tool_call" | "tool_result";
+  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result";
   text: string;
   toolName?: string;
   isError?: boolean;
@@ -53,16 +54,29 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+}
+
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
   const leaderTools = props.toolRegistry.getAll().length;
   const totalTools = props.totalToolCount ?? leaderTools;
   const [input, setInput] = useState("");
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>(
+    props.bannerText ? [{ type: "banner", text: props.bannerText }] : []
+  );
   const [isRunning, setIsRunning] = useState(false);
-  const [streamBuffer, setStreamBuffer] = useState("");
+  const [pendingLines, setPendingLines] = useState<string[]>([]);
+  const [liveTail, setLiveTail] = useState("");
   const [currentToolName, setCurrentToolName] = useState("");
+  const [elapsedSecs, setElapsedSecs] = useState(0);
   const [tokens, setTokens] = useState({ input: 0, output: 0 });
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
@@ -76,6 +90,58 @@ export const App: React.FC<AppProps> = (props) => {
   const replStartCwdRef = useRef(process.cwd());
   const fastModelRef = useRef(props.fastModel);
   const reasoningModelRef = useRef(process.env["ATLAS_REASONING_MODEL"]);
+  const lineQueueRef = useRef<Array<{ text: string; ts: number }>>([]);
+  const catchUpRef = useRef(false);
+  const catchUpExitSinceRef = useRef<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isRunning) { setElapsedSecs(0); return; }
+    startedAtRef.current = Date.now();
+    setElapsedSecs(0);
+    const id = setInterval(() => {
+      setElapsedSecs(Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const ENTER_QUEUE_DEPTH = 8;
+    const ENTER_OLDEST_AGE_MS = 120;
+    const EXIT_QUEUE_DEPTH = 2;
+    const EXIT_OLDEST_AGE_MS = 40;
+    const EXIT_HOLD_MS = 250;
+
+    const id = setInterval(() => {
+      const lineQueue = lineQueueRef.current;
+      if (lineQueue.length === 0) return;
+      const now = Date.now();
+      const oldest = lineQueue[0]?.ts ?? now;
+      const age = now - oldest;
+      if (!catchUpRef.current) {
+        if (lineQueue.length >= ENTER_QUEUE_DEPTH || age >= ENTER_OLDEST_AGE_MS) {
+          catchUpRef.current = true;
+          catchUpExitSinceRef.current = null;
+        }
+      } else {
+        if (lineQueue.length <= EXIT_QUEUE_DEPTH && age <= EXIT_OLDEST_AGE_MS) {
+          if (catchUpExitSinceRef.current === null) catchUpExitSinceRef.current = now;
+          if (now - catchUpExitSinceRef.current >= EXIT_HOLD_MS) {
+            catchUpRef.current = false;
+            catchUpExitSinceRef.current = null;
+          }
+        } else {
+          catchUpExitSinceRef.current = null;
+        }
+      }
+      const toDrain = catchUpRef.current ? lineQueue.splice(0) : lineQueue.splice(0, 1);
+      if (toDrain.length > 0) {
+        setPendingLines(prev => [...prev, ...toDrain.map(l => l.text)]);
+      }
+    }, 50);
+    return () => clearInterval(id);
+  }, [isRunning]);
 
   useEffect(() => {
     if (props.startInPlanMode) planModeRef.current.enter();
@@ -136,8 +202,13 @@ export const App: React.FC<AppProps> = (props) => {
     const controller = new AbortController();
     runningControllerRef.current = controller;
     setIsRunning(true);
-    setStreamBuffer("");
-    let streamedText = "";
+    setPendingLines([]);
+    setLiveTail("");
+    lineQueueRef.current = [];
+    catchUpRef.current = false;
+    catchUpExitSinceRef.current = null;
+    let rawSource = "";
+    let committedLen = 0;
 
     // Install tool callbacks on executor to capture tool call events when running in Ink mode
     try {
@@ -151,14 +222,6 @@ export const App: React.FC<AppProps> = (props) => {
     } catch (e) {}
 
     try {
-      let pendingFlush: NodeJS.Timeout | null = null;
-      const flushBuffer = () => {
-        if (pendingFlush) return;
-        pendingFlush = setTimeout(() => {
-          setStreamBuffer(streamedText);
-          pendingFlush = null;
-        }, 50);
-      };
       const result = await runAgentLoop({
         provider: options?.provider ?? props.provider,
         messages: messagesRef.current,
@@ -167,16 +230,32 @@ export const App: React.FC<AppProps> = (props) => {
         systemPrompt: options?.systemPrompt ?? props.systemPrompt,
         abortSignal: controller.signal,
         onText: text => {
-          streamedText += text;
-          flushBuffer();
+          rawSource += text;
+          const lastNl = rawSource.lastIndexOf("\n");
+          if (lastNl >= committedLen) {
+            const newComplete = rawSource.slice(committedLen, lastNl + 1);
+            committedLen = lastNl + 1;
+            const lines = newComplete.split("\n");
+            const now = Date.now();
+            for (const line of lines) {
+              if (line !== "") lineQueueRef.current.push({ text: line, ts: now });
+            }
+          }
+          const tail = rawSource.slice(committedLen);
+          setLiveTail(tail);
         },
       });
-      if (pendingFlush) { clearTimeout(pendingFlush); pendingFlush = null; }
       setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
-      setStreamBuffer("");
-      if (streamedText.trim()) {
-        setHistory(h => [...h, { type: "assistant", text: streamedText }]);
+      if (rawSource.length > committedLen) {
+        lineQueueRef.current.push({ text: rawSource.slice(committedLen), ts: Date.now() });
       }
+      lineQueueRef.current.splice(0);
+      if (rawSource.trim()) {
+        setHistory(h => [...h, { type: "assistant", text: rawSource }]);
+      }
+      setPendingLines([]);
+      setLiveTail("");
+      lineQueueRef.current = [];
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
@@ -508,6 +587,9 @@ export const App: React.FC<AppProps> = (props) => {
       <Static items={history}>
         {(entry, index) => (
           <Box key={index} flexDirection="column" marginBottom={1}>
+            {entry.type === "banner" && (
+              <Text>{entry.text}</Text>
+            )}
             {entry.type === "user" && (
               <Box>
                 <Text color="cyan" bold>{"> "}</Text>
@@ -534,20 +616,25 @@ export const App: React.FC<AppProps> = (props) => {
               </Box>
             )}
             {entry.type === "system" && (
-              <Text color="yellow" dimColor>{entry.text}</Text>
+              <Text color="cyan" dimColor>{entry.text}</Text>
             )}
           </Box>
         )}
       </Static>
-      {streamBuffer && (
+      {pendingLines.length > 0 && (
         <Box flexDirection="column">
-          <Text>{streamBuffer}</Text>
+          {pendingLines.map((line, i) => <Text key={i}>{line}</Text>)}
+        </Box>
+      )}
+      {liveTail && (
+        <Box>
+          <Text>{liveTail}</Text>
         </Box>
       )}
       {isRunning && (
         <Box>
-          <Text color="yellow"><Spinner /></Text>
-          <Text color="gray"> {currentToolName ? `${currentToolName}…` : "thinking…"}</Text>
+          <Text color="cyan"><Spinner /></Text>
+          <Text color="gray"> Working · {formatElapsed(elapsedSecs)}{currentToolName ? ` · ${currentToolName}` : ""} · esc to interrupt</Text>
         </Box>
       )}
       {!isRunning && (

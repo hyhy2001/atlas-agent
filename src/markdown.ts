@@ -18,7 +18,7 @@ marked.setOptions({
     codespan: (text: string) => chalk.bgGray.white(` ${text} `),
     heading: (text: string, level: number) => {
       const prefix = "#".repeat(level);
-      return chalk.bold.blue(`${prefix} ${text}`) + "\n";
+      return chalk.bold(`${prefix} ${text}`) + "\n";
     },
     blockquote: (text: string) => chalk.gray("│ ") + chalk.italic(text),
     hr: () => chalk.gray("─".repeat(40)) + "\n",
@@ -90,9 +90,9 @@ export class MarkdownRenderer {
   }
 
   private renderLine(line: string): string {
-    if (line.startsWith("### ")) return chalk.bold.blue(line);
-    if (line.startsWith("## ")) return chalk.bold.blue(line);
-    if (line.startsWith("# ")) return chalk.bold.blue(line);
+    if (line.startsWith("### ")) return chalk.bold(line);
+    if (line.startsWith("## ")) return chalk.bold(line);
+    if (line.startsWith("# ")) return chalk.bold(line);
 
     if (line.match(/^[-*_]{3,}$/)) return chalk.gray("─".repeat(40));
 

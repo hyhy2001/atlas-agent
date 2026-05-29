@@ -10,7 +10,7 @@ import type { CustomCommand } from "../commands.js";
 import type { SubagentProfile } from "../agent/subagents.js";
 import type { HooksConfig } from "../hooks.js";
 
-function printBanner(leaderTools: number, totalTools: number, model: string): void {
+function buildBanner(leaderTools: number, totalTools: number, model: string): string {
   const cols = process.stdout.columns ?? 100;
   const width = Math.min(cols - 2, 120);
   const leftW = 40;
@@ -55,14 +55,15 @@ function printBanner(leaderTools: number, totalTools: number, model: string): vo
   const maxLines = Math.max(leftLines.length, rightLines.length);
   const topBorder = `╭─── ${c(title)} ${"─".repeat(Math.max(0, width - title.length - 6))}╮`;
   const botBorder = `╰${"─".repeat(width)}╯`;
+  const lines = ["", topBorder];
 
-  process.stdout.write("\n" + topBorder + "\n");
   for (let i = 0; i < maxLines; i++) {
     const left = center(leftLines[i] ?? "", leftW);
     const right = pad(rightLines[i] ?? "", rightW);
-    process.stdout.write(`│${left}│ ${right}│\n`);
+    lines.push(`│${left}│ ${right}│`);
   }
-  process.stdout.write(botBorder + "\n\n");
+  lines.push(botBorder, "");
+  return lines.join("\n");
 }
 
 function stripAnsi(s: string): string {
@@ -85,9 +86,10 @@ export async function startTui(params: {
 }): Promise<void> {
   process.env.__ATLAS_INK_MODE = "1";
   const leaderTools = params.toolRegistry.getAll().length;
-  printBanner(leaderTools, params.totalToolCount ?? leaderTools, params.provider.getModel());
+  const bannerText = buildBanner(leaderTools, params.totalToolCount ?? leaderTools, params.provider.getModel());
   const { waitUntilExit } = render(
     <App
+      bannerText={bannerText}
       provider={params.provider}
       toolRegistry={params.toolRegistry}
       executor={params.executor}
