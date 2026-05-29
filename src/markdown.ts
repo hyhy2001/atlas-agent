@@ -72,7 +72,6 @@ export class MarkdownRenderer {
 
       if (this.inCodeBlock) {
         this.codeBlockLines.push(line);
-        output += chalk.cyan(line) + "\n";
         continue;
       }
 
@@ -83,9 +82,23 @@ export class MarkdownRenderer {
   }
 
   flush(): string {
-    if (!this.buffer) return "";
-    const output = this.inCodeBlock ? chalk.cyan(this.buffer) : this.renderLine(this.buffer);
-    this.buffer = "";
+    let output = "";
+    // If stream ended inside an unclosed code block, emit accumulated lines
+    if (this.inCodeBlock && this.codeBlockLines.length > 0) {
+      const code = this.codeBlockLines.join("\n");
+      try {
+        output += this.codeBlockLang
+          ? highlight(code, { language: this.codeBlockLang, ignoreIllegals: true }) + "\n"
+          : highlight(code, { ignoreIllegals: true }) + "\n";
+      } catch {
+        output += chalk.cyan(code) + "\n";
+      }
+      this.codeBlockLines = [];
+    }
+    if (this.buffer) {
+      output += this.inCodeBlock ? chalk.cyan(this.buffer) : this.renderLine(this.buffer);
+      this.buffer = "";
+    }
     return output;
   }
 
