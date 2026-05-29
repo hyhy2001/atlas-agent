@@ -105,7 +105,7 @@ export const App: React.FC<AppProps> = (props) => {
 
   useEffect(() => {
     if (!isRunning) { setSpinFrame(0); return; }
-    const id = setInterval(() => setSpinFrame(f => (f + 1) % 10), 500);
+    const id = setInterval(() => setSpinFrame(f => (f + 1) % 10), 80);
     return () => clearInterval(id);
   }, [isRunning]);
 
