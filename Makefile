@@ -133,12 +133,19 @@ install-bun:
 ## deps: Install npm dependencies
 deps:
 	@echo "Installing npm dependencies..."
-	@SKIP_BINARY_BUILD=1 $(NPM) install --include=dev --silent
+	@SKIP_BINARY_BUILD=1 $(NPM) install --include=dev
+	@if [ ! -x "$(CURDIR)/node_modules/.bin/tsc" ]; then \
+	  echo ""; \
+	  echo "  ✗ TypeScript not installed. node_modules/.bin/tsc missing."; \
+	  echo "    Try: rm -rf node_modules && make deps"; \
+	  exit 1; \
+	fi
+	@echo "  ✓ TypeScript installed"
 
 ## build: Compile TypeScript
 build:
 	@echo "Building TypeScript..."
-	@PATH="$(CURDIR)/node_modules/.bin:$$PATH" $(NPM) run build --silent
+	@PATH="$(CURDIR)/node_modules/.bin:$$PATH" $(NODE) $(CURDIR)/node_modules/typescript/bin/tsc -p tsconfig.json
 
 ## binary: Build binary for current OS
 binary:
