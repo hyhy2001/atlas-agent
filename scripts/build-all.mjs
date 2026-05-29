@@ -13,6 +13,10 @@ const TARGETS = [
 
 mkdirSync("release", { recursive: true });
 
+// Patch ink devtools imports so bun --compile doesn't fail to resolve
+// the optional react-devtools-core package at runtime.
+spawnSync("node", ["scripts/patch-ink.mjs"], { stdio: "inherit" });
+
 let built = 0;
 for (const { key, target, ext } of TARGETS) {
   const outFile = `release/atlas-agent-${key}${ext}`;
@@ -20,7 +24,7 @@ for (const { key, target, ext } of TARGETS) {
 
   const r = spawnSync(
     "bun",
-    ["build", "--compile", "--minify", "--external", "react-devtools-core", `--target=${target}`, "./src/cli.ts", `--outfile=${outFile}`],
+    ["build", "--compile", "--minify", `--target=${target}`, "./src/cli.ts", `--outfile=${outFile}`],
     { stdio: "pipe" }
   );
 
