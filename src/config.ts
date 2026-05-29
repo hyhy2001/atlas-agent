@@ -19,7 +19,7 @@ const ConfigSchema = z.object({
   systemPrompt: z.string().optional(),
   trustedDirs: z.array(z.string()).default([]),
   mcpServers: z.array(McpServerSchema).default([
-    { name: "codebase-memory", command: "codebase-memory-mcp", args: [], autoApprove: true },
+    { name: "codebase-memory", command: "./.atlas/bin/codebase-memory-mcp", args: [], autoApprove: true },
   ]),
 });
 

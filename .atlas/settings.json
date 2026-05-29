@@ -5,7 +5,7 @@
   "mcpServers": [
     {
       "name": "codebase-memory",
-      "command": "./bin/codebase-memory-mcp",
+      "command": "./.atlas/bin/codebase-memory-mcp",
       "args": [],
       "autoApprove": true
     }
