@@ -18,7 +18,12 @@ const ATLAS_CODER_PROMPT = `You are atlas-forge, a code implementation agent. Yo
 
 Rules:
 - Follow the plan provided by the leader exactly
-- Use read_file, grep, glob, list_directory to understand code before editing
+- For code discovery, PREFER MCP tools when available:
+  - codebase-memory__search_graph: find functions/classes/routes by name or query
+  - codebase-memory__get_code_snippet: read source of a specific symbol
+  - codebase-memory__trace_path: find callers/callees, data flow
+  - codebase-memory__search_code: text search with graph ranking
+  - Fall back to read_file, grep, glob only when MCP tools are unavailable
 - Use edit_file and write_file to make changes
 - Run build and test commands with bash after changes
 - Report: files changed, diff summary, build/test results, blockers
@@ -30,7 +35,12 @@ const ATLAS_RESCUE_PROMPT = `You are atlas-deep, a deep investigation agent. You
 Rules:
 - Start fresh — do NOT repeat the same approach that failed
 - Investigate root cause thoroughly before attempting a fix
-- Use read_file, grep, glob extensively to understand the full picture
+- PREFER MCP tools for deep investigation:
+  - codebase-memory__search_graph: find symbols, understand structure
+  - codebase-memory__trace_path: trace call chains and data flow
+  - codebase-memory__query_graph: complex multi-hop Cypher queries
+  - codebase-memory__get_architecture: understand project structure
+  - Fall back to read_file, grep, glob when MCP unavailable
 - Consider alternative approaches the previous attempts missed
 - Report your findings and proposed approach before making changes
 - Be thorough but surgical — fix the actual problem, not symptoms`;
@@ -113,19 +123,15 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
 
   const leaderExecutor = (ctx as any)._executor;
   const leaderOnToolCall = leaderExecutor ? (leaderExecutor as any)._onToolCall : null;
-  const leaderOnToolResult = leaderExecutor ? (leaderExecutor as any)._onToolResult : null;
   const leaderOnSubagentDone = leaderExecutor ? (leaderExecutor as any)._onSubagentDone : null;
   const leaderOnDelegateStart = leaderExecutor ? (leaderExecutor as any)._onDelegateStart : null;
   let toolUseCount = 0;
   if (leaderOnToolCall) {
     (subExecutor as any)._onToolCall = (name: string, summary: string) => {
       toolUseCount++;
+      // Forward only the call, with nested=true. Skip _onToolResult to keep
+      // leader TUI clean — subagent's tool outputs would otherwise flood scrollback.
       leaderOnToolCall(name, summary, true);
-    };
-  }
-  if (leaderOnToolResult) {
-    (subExecutor as any)._onToolResult = (name: string, result: string, isError: boolean) => {
-      leaderOnToolResult(name, result, isError, true);
     };
   }
   if (leaderOnDelegateStart) {
@@ -157,7 +163,11 @@ async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext):
 
   const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
   const result = (lastAssistant && lastAssistant.content) ? lastAssistant.content : "(no response)";
-  return result;
+  // Truncate to 2000 chars for leader TUI display — full result is in messages history
+  const truncated = typeof result === "string" && result.length > 2000
+    ? result.slice(0, 2000) + `\n… (${result.length - 2000} more chars)`
+    : result;
+  return typeof truncated === "string" ? truncated : String(truncated);
 }
 
 export const delegateTool: ToolDefinition = {
@@ -195,7 +205,7 @@ export const delegateTool: ToolDefinition = {
     const { agent, task, files, build_command, test_command } = input as DelegateInput;
 
     const result = await executeSingleDelegate({ agent, task, files, build_command, test_command }, ctx);
-    return { toolUseId: "", content: result.slice(0, 50000), isError: false };
+    return { toolUseId: "", content: typeof result === "string" ? result : String(result), isError: false };
   },
 };
 
