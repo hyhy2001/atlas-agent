@@ -7,19 +7,20 @@ import { homedir } from "node:os";
  * Used for: global settings, MCP binaries, default commands/agents.
  */
 export function getAtlasRoot(): string {
-  // Explicit override — highest priority. Set this when running atlas from
-  // a different directory than where it was installed.
+  // Explicit override — highest priority.
   if (process.env["ATLAS_ROOT"]) {
     return process.env["ATLAS_ROOT"];
   }
 
   const exe = process.execPath;
-  const script = process.argv[1];
+  const script = process.argv[1] ?? "";
 
-  const candidates = [
-    dirname(resolve(exe)),
-    dirname(resolve(script || "")),
-  ];
+  // Bun compiled binary: argv[1] = "/$bunfs/..." (virtual FS), use execPath only.
+  // Otherwise check both execPath dir and script dir.
+  const isBunVfs = script.startsWith("/$bunfs/");
+  const candidates = isBunVfs
+    ? [dirname(resolve(exe))]
+    : [dirname(resolve(exe)), dirname(resolve(script))];
 
   for (const dir of candidates) {
     if (existsSync(join(dir, ".atlas", "settings.json"))) {

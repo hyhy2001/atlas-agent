@@ -17,27 +17,15 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
 }
 
 function getLoginConfigPath(): string {
-  // Save credentials next to the binary so they travel with it.
-  // Bun compiled binaries have argv[1] = "/$bunfs/..." (virtual FS) — use execPath instead.
-  // Fall back to paths.config() in dev mode (dist/cli.js or src/cli.ts).
-  const script = process.argv[1] ?? "";
-  const isBunVfs = script.startsWith("/$bunfs/");
-  const isDevCli = script.endsWith("dist/cli.js") || script.endsWith("src/cli.ts");
-
-  let binaryPath: string;
-  if (isBunVfs || isDevCli) {
-    // Bun binary: use execPath (the actual binary on disk)
-    // Dev mode: fall back to install dir
-    if (isBunVfs) {
-      binaryPath = process.execPath;
-    } else {
-      return paths.config();
-    }
-  } else {
-    binaryPath = script;
-  }
-
-  return join(dirname(resolve(binaryPath)), ".atlas", "settings.json");
+  // Always save to paths.config() = atlasRoot()/.atlas/settings.json.
+  // atlasRoot() resolves in priority order:
+  //   1. ATLAS_ROOT env var
+  //   2. dirname(execPath)/.atlas/settings.json exists → use that dir
+  //   3. dirname(argv[1])/.atlas/settings.json exists → use that dir
+  //   4. dev mode (dist/cli.js + package.json in cwd)
+  //   5. fallback: ~/.atlas-agent
+  // This is the canonical install dir — the right place for credentials.
+  return paths.config();
 }
 
 function makeRl(): ReturnType<typeof createInterface> {
