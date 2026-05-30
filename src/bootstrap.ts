@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, createReadStream } from "node:fs";
 import { join, dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 
 const SETTINGS_TEMPLATE = JSON.stringify({
@@ -29,11 +28,19 @@ function createAtlasDir(dir: string): void {
 }
 
 function prompt(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => {
+  return new Promise(res => {
+    // Use /dev/tty so the prompt works even when stdin is piped
+    // (e.g. atlas-agent -p "..." < /dev/null). Fall back to stdin
+    // on platforms without /dev/tty (Windows).
+    let input: NodeJS.ReadableStream = process.stdin;
+    if (process.platform !== "win32") {
+      try { input = createReadStream("/dev/tty"); } catch { /* fallback to stdin */ }
+    }
+    const rl = createInterface({ input, output: process.stdout, terminal: true });
     rl.question(question, answer => {
       rl.close();
-      resolve(answer.trim());
+      if (input !== process.stdin) (input as { destroy?: () => void }).destroy?.();
+      res(answer.trim());
     });
   });
 }
@@ -61,16 +68,21 @@ function getBinaryDir(): string | null {
  */
 export async function maybeBootstrap(): Promise<void> {
   const binaryDir = getBinaryDir();
-  const homeDir = join(homedir(), ".atlas-agent");
+  const cwd = process.cwd();
 
-  // Already configured at the binary's install location or in home — nothing
-  // to do. We do NOT check cwd: a project-local .atlas/ holds sessions/memory
-  // for that project, not the install-level settings the bootstrap creates.
+  // Already configured at the binary's install location or cwd — nothing to do.
   if (binaryDir && atlasExistsAt(binaryDir)) return;
-  if (atlasExistsAt(homeDir)) return;
+  if (atlasExistsAt(cwd)) return;
 
   // Not a binary run (dev mode) — skip
   if (!binaryDir) return;
+
+  // No TTY available (CI, piped, headless) — auto-create at cwd silently.
+  if (!process.stdout.isTTY) {
+    createAtlasDir(cwd);
+    console.log(`Atlas: created .atlas/ at ${join(cwd, ".atlas")} (edit settings.json to configure)`);
+    return;
+  }
 
   // First run — ask user
   console.log("\n╭─── Atlas — First Run Setup ───────────────────────────────╮");
@@ -78,17 +90,20 @@ export async function maybeBootstrap(): Promise<void> {
   console.log("│  No .atlas/ configuration found.                          │");
   console.log("│  Where should Atlas store its settings?                   │");
   console.log("│                                                            │");
-  console.log(`│  [1] Portable  — next to this binary                      │`);
-  console.log(`│      ${binaryDir.slice(0, 52).padEnd(52)}  │`);
+  console.log(`│  [1] Current Dir                                           │`);
+  console.log(`│      ${cwd.slice(0, 52).padEnd(52)}  │`);
   console.log("│                                                            │");
-  console.log(`│  [2] Global    — your home directory                      │`);
-  console.log(`│      ${homeDir.slice(0, 52).padEnd(52)}  │`);
+  console.log(`│  [2] Other Dir  (you will be prompted for a path)         │`);
   console.log("│                                                            │");
   console.log("╰────────────────────────────────────────────────────────────╯\n");
 
-  const answer = await prompt("Choose [1] portable (default) or [2] global: ");
-  const useHome = answer === "2";
-  const targetDir = useHome ? homeDir : binaryDir;
+  const answer = await prompt("Choose [1] current dir (default) or [2] other dir: ");
+
+  let targetDir = cwd;
+  if (answer === "2") {
+    const customPath = await prompt("Enter directory path: ");
+    targetDir = resolve(customPath.trim() || cwd);
+  }
 
   createAtlasDir(targetDir);
 
