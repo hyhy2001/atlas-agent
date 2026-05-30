@@ -2,7 +2,6 @@ export interface ProviderConfig {
   baseURL?: string;
   apiKey: string;
   model: string;
-  modelEndpoints?: Record<string, { baseURL: string; authToken?: string }>;
 }
 
 export interface Message {

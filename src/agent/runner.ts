@@ -125,8 +125,8 @@ export async function runSubagent(opts: RunSubagentOptions, ctx: ExecutionContex
     return { output: "Error: subagent runner not available (provider/registry not set)", toolUseCount: 0, durationMs: 0, tokens: 0, error: "missing_runtime" };
   }
 
-  const fastModel = ctx.pickFastModel?.() || ctx.fastModel || process.env["ATLAS_FAST_MODEL"];
-  const reasoningModel = ctx.pickReasoningModel?.() || ctx.reasoningModel || process.env["ATLAS_REASONING_MODEL"];
+  const fastModel = ctx.fastModel || process.env["ATLAS_FAST_MODEL"];
+  const reasoningModel = ctx.reasoningModel || process.env["ATLAS_REASONING_MODEL"];
   const { systemPrompt, subProvider } = selectProfile(opts.profile, provider, fastModel, reasoningModel);
 
   const messages: Message[] = [{ role: "user", content: buildTaskPrompt(opts) }];

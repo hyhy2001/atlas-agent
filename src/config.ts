@@ -14,19 +14,8 @@ const ConfigSchema = z.object({
   model: z.string().default("all"),
   fastModel: z.string().optional(),
   reasoningModel: z.string().optional(),
-  // Round-robin pools for subagent tiers — atlas cycles through models for
-  // each delegate call. Use to load-balance across multiple API keys / providers
-  // or avoid rate limits. Takes precedence over the single-string field.
-  // Note: leader is intentionally NOT round-robin — a conversation needs a
-  // consistent model for context coherence.
-  fastModelPool: z.array(z.string()).optional(),
-  reasoningModelPool: z.array(z.string()).optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
-  modelEndpoints: z.record(z.string(), z.object({
-    baseURL: z.string(),
-    authToken: z.string().optional(),
-  })).default({}),
   systemPrompt: z.string().optional(),
   theme: z.enum(["dark", "light", "monokai", "solarized"]).default("dark"),
   trustedDirs: z.array(z.string()).default([]),
@@ -96,14 +85,6 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   if (process.env["ATLAS_FAST_MODEL"]) merged.fastModel = process.env["ATLAS_FAST_MODEL"];
   if (process.env["ATLAS_REASONING_MODEL"]) merged.reasoningModel = process.env["ATLAS_REASONING_MODEL"];
-
-  if (process.env["ATLAS_MODEL_ENDPOINTS"]) {
-    try {
-      merged.modelEndpoints = JSON.parse(process.env["ATLAS_MODEL_ENDPOINTS"]);
-    } catch {
-      // ignore malformed
-    }
-  }
 
   if (process.env["ATLAS_SYSTEM_PROMPT"]) {
     merged.systemPrompt = process.env["ATLAS_SYSTEM_PROMPT"];

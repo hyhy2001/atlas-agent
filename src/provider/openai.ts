@@ -37,15 +37,6 @@ export class OpenAIProvider {
   }
 
   withModel(model: string): OpenAIProvider {
-    const endpoint = this.config.modelEndpoints?.[model];
-    if (endpoint) {
-      return new OpenAIProvider({
-        ...this.config,
-        model,
-        apiKey: endpoint.authToken ?? this.config.apiKey,
-        baseURL: endpoint.baseURL,
-      });
-    }
     return new OpenAIProvider({ ...this.config, model });
   }
 
