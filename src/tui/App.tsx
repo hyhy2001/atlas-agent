@@ -174,6 +174,24 @@ export const App: React.FC<AppProps> = (props) => {
   const queuedMessageRef = useRef<string | null>(null);
   const handleSubmitRef = useRef<(value: string) => Promise<void>>(async () => {});
 
+  // Truncate the input when it grows past 10k chars (paste-via-bracketed-mode
+  // that bypassed paste detection, or long accumulated content). Replace the
+  // middle with a [paste #N: M lines] ref so the prompt stays readable, while
+  // the full content is restored at submit time. cc-ref behaviour parity.
+  useEffect(() => {
+    const TRUNCATION_THRESHOLD = 10_000;
+    const PREVIEW_LENGTH = 1000;
+    if (input.length <= TRUNCATION_THRESHOLD) return;
+    const head = Math.floor(PREVIEW_LENGTH / 2);
+    const tail = Math.floor(PREVIEW_LENGTH / 2);
+    const middle = input.slice(head, -tail);
+    const lineCount = middle.split("\n").length;
+    const id = String(++pasteCounterRef.current);
+    pasteRefsRef.current.set(id, middle);
+    const placeholder = `[paste #${id}: ${lineCount} line${lineCount > 1 ? "s" : ""}]`;
+    setInput(input.slice(0, head) + placeholder + input.slice(-tail));
+  }, [input]);
+
   useEffect(() => {
     import("node:child_process").then(({ execSync }) => {
       try {
