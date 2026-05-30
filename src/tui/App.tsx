@@ -1581,7 +1581,6 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             elapsedSecs={elapsedSecs}
             liveTokens={liveTokens}
             currentToolName={currentToolName}
-            reasoningPreview={reasoningPreview}
             tip={tip}
           />
         )}
