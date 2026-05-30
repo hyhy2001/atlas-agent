@@ -49,13 +49,13 @@ export function PromptInput({
           <Text color={theme.muted} dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 3 : 0)))}</Text>
           {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─"}</Text>}
         </Box>
-        <Box paddingX={1}>
+        <Box paddingX={2}>
           <Text color={theme.muted}>{prefix}</Text>
           <Text>{input}</Text>
           <Text color={theme.muted}>█</Text>
         </Box>
         {queuedMessage && (
-          <Box paddingX={1}>
+          <Box paddingX={2}>
             <Text color={theme.warning} dimColor>{"⏎ queued: "}</Text>
             <Text color={theme.muted} dimColor>{queuedMessage.length > 60 ? queuedMessage.slice(0, 60) + "…" : queuedMessage}</Text>
           </Box>
@@ -98,7 +98,7 @@ export function PromptInput({
         <Box>
           <Text color={theme.muted} dimColor>{"─".repeat(fullWidth)}</Text>
         </Box>
-        <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
+        <Box paddingX={2} justifyContent="space-between" width={fullWidth}>
           <Text color={theme.muted} dimColor>{
             isRunning
               ? "↵ · queue message  Ctrl+C · interrupt  Ctrl+O · expand"
@@ -113,7 +113,7 @@ export function PromptInput({
           )}
         </Box>
       </Box>
-      <Box paddingX={1}>
+      <Box paddingX={2}>
         <Text color={theme.muted} dimColor>{(() => {
           const parts: string[] = [];
           if (tokens.input + tokens.output > 0) parts.push(`${formatTokenCount(tokens.input)}↑ ${formatTokenCount(tokens.output)}↓`);

@@ -106,8 +106,12 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
   const displayed = groupConsecutiveToolCalls(history);
   return (
     <Static items={displayed}>
-      {(entry, index) => (
-        <Box key={index} flexDirection="column" marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
+      {(entry, index) => {
+        // Add top margin when a tool_call follows assistant text (cc-ref addMargin pattern)
+        const prev = index > 0 ? displayed[index - 1] : null;
+        const addMargin = entry.type === "tool_call" && prev?.type === "assistant";
+        return (
+        <Box key={index} flexDirection="column" marginTop={addMargin ? 1 : 0} marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
           {entry.type === "banner" && (
             <Text>{entry.text}</Text>
           )}
@@ -195,7 +199,8 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             <Text color={theme.primary} dimColor>{entry.text}</Text>
           )}
         </Box>
-      )}
+        );
+      }}
     </Static>
   );
 }
