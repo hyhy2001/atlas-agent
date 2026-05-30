@@ -35,3 +35,30 @@ export async function offloadIfLarge(toolUseId: string, content: string): Promis
     `[Read the file directly if you need the rest]`,
   ].join("\n");
 }
+
+// Delete tool-result files older than maxAgeDays. Best-effort: errors swallowed
+// so housekeeping never breaks startup. Returns the number of files deleted.
+export async function cleanupOldToolResults(maxAgeDays = 7): Promise<number> {
+  const dir = path.join(paths.cache(), "tool-results");
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return 0;
+  }
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let deleted = 0;
+  await Promise.all(entries.map(async (name) => {
+    const filePath = path.join(dir, name);
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.isFile() && stat.mtimeMs < cutoff) {
+        await fs.unlink(filePath);
+        deleted++;
+      }
+    } catch {
+      // ignore individual file errors
+    }
+  }));
+  return deleted;
+}

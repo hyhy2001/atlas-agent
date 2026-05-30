@@ -286,6 +286,12 @@ async function main() {
     console.log(`Loaded ${skills.length} skills`);
   }
 
+  // Background housekeeping: prune tool-result offload files older than 7 days.
+  // Fire-and-forget — never blocks startup or fails the session.
+  void import("./utils/toolResultStorage.js").then(({ cleanupOldToolResults }) =>
+    cleanupOldToolResults(7).catch(() => {})
+  );
+
   const customAgents = await loadCustomSubagents(process.cwd());
   const map = new Map<string, import("./agent/subagents.js").SubagentProfile>();
   for (const a of BUILTIN_SUBAGENTS) map.set(a.name, a);
