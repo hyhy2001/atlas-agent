@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { createReadStream } from "node:fs";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import chalk from "chalk";
@@ -15,6 +16,16 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
   });
 }
 
+function makeRl(): ReturnType<typeof createInterface> {
+  // Use /dev/tty so readline doesn't consume process.stdin.
+  // If stdin is closed after rl.close(), Ink can't read keyboard input → TUI hangs.
+  let input: NodeJS.ReadableStream = process.stdin;
+  if (process.platform !== "win32") {
+    try { input = createReadStream("/dev/tty"); } catch { /* fallback */ }
+  }
+  return createInterface({ input, output: process.stdout, terminal: true });
+}
+
 export async function interactiveLogin(): Promise<Credentials | null> {
   console.clear();
   console.log(chalk.bold.cyan("╔══════════════════════════════════════╗"));
@@ -27,7 +38,7 @@ export async function interactiveLogin(): Promise<Credentials | null> {
   console.log(chalk.gray("  3. [Coming soon] Enterprise SSO"));
   console.log("");
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = makeRl();
 
   try {
     const choice = await prompt(rl, chalk.cyan("Select [1]: "));
@@ -53,12 +64,13 @@ export async function interactiveLogin(): Promise<Credentials | null> {
     }
 
     console.log("");
-    const save = await prompt(rl, chalk.white("Save to .atlas/settings.json?") + chalk.gray(" [Y/n]: "));
+    const configPath = paths.config();
+    const save = await prompt(rl, chalk.white(`Save to ${configPath}?`) + chalk.gray(" [Y/n]: "));
     rl.close();
 
     if (save.toLowerCase() !== "n") {
       saveCredentials({ baseURL, authToken });
-      console.log(chalk.green("✓ Credentials saved to .atlas/settings.json"));
+      console.log(chalk.green(`✓ Credentials saved to ${configPath}`));
     }
 
     console.log("");
