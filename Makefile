@@ -1,4 +1,4 @@
-.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp build-mcp deps binary ensure-node ensure-bun
+.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp build-mcp deps binary ensure-node ensure-bun _write-settings
 
 # Detect OS and arch
 OS     := $(shell uname -s 2>/dev/null || echo Windows)
@@ -214,6 +214,19 @@ install-mcp:
 	    rm -f "$$TMPFILE"; \
 	    echo "  Warning: download failed. Atlas will work without code intelligence."; \
 	  fi; \
+	fi
+	@$(MAKE) --no-print-directory _write-settings
+
+## _write-settings: Write .atlas/settings.json with absolute MCP path
+_write-settings:
+	@mkdir -p .atlas
+	@MCP_BIN="$$(pwd)/.atlas/bin/codebase-memory-mcp"; \
+	if [ ! -f .atlas/settings.json ]; then \
+	  echo "  Writing .atlas/settings.json with absolute MCP path..."; \
+	  printf '{\n  "model": "all",\n  "mcpServers": [\n    {\n      "name": "codebase-memory",\n      "command": "%s",\n      "args": [],\n      "autoApprove": true\n    }\n  ]\n}\n' "$$MCP_BIN" > .atlas/settings.json; \
+	  echo "  ✓ .atlas/settings.json created"; \
+	else \
+	  echo "  ✓ .atlas/settings.json already exists (not overwritten)"; \
 	fi
 
 ## build-mcp: Build codebase-memory-mcp from source (use when release binary is glibc-incompatible)
