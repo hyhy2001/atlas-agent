@@ -204,6 +204,7 @@ async function main() {
     apiKey,
     model: config.model,
     baseURL: resolvedBaseURL,
+    modelEndpoints: config.modelEndpoints,
   });
 
   const mcpClients: McpClient[] = [];

@@ -16,6 +16,10 @@ const ConfigSchema = z.object({
   reasoningModel: z.string().optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
+  modelEndpoints: z.record(z.string(), z.object({
+    baseURL: z.string(),
+    authToken: z.string().optional(),
+  })).default({}),
   systemPrompt: z.string().optional(),
   theme: z.enum(["dark", "light", "monokai", "solarized"]).default("dark"),
   trustedDirs: z.array(z.string()).default([]),
@@ -85,6 +89,14 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   if (process.env["ATLAS_FAST_MODEL"]) merged.fastModel = process.env["ATLAS_FAST_MODEL"];
   if (process.env["ATLAS_REASONING_MODEL"]) merged.reasoningModel = process.env["ATLAS_REASONING_MODEL"];
+
+  if (process.env["ATLAS_MODEL_ENDPOINTS"]) {
+    try {
+      merged.modelEndpoints = JSON.parse(process.env["ATLAS_MODEL_ENDPOINTS"]);
+    } catch {
+      // ignore malformed
+    }
+  }
 
   if (process.env["ATLAS_SYSTEM_PROMPT"]) {
     merged.systemPrompt = process.env["ATLAS_SYSTEM_PROMPT"];

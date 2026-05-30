@@ -63,9 +63,28 @@ make clean          # Remove build artifacts
 - `ATLAS_MODEL` — main / leader model
 - `ATLAS_FAST_MODEL` — fast model for atlas-swift and atlas-forge
 - `ATLAS_REASONING_MODEL` — reasoning model for atlas-deep
+- `ATLAS_MODEL_ENDPOINTS` — JSON map of model → {baseURL, authToken} for per-model endpoints
+  Example: '{"claude-opus-4.7":{"baseURL":"https://api.anthropic.com/v1","authToken":"sk-ant-..."}}'
 - `ATLAS_SYSTEM_PROMPT` — override the default system prompt
 
 If a tier-specific model is unset, the main model is used as fallback.
+
+## Per-Model Endpoints
+
+`settings.json` supports a `modelEndpoints` map to route specific models to different base URLs and auth tokens. When a model is switched via `withModel`, Atlas uses the matching endpoint override if present, otherwise it falls back to the default `baseURL` / `authToken`.
+
+```json
+{
+  "model": "claude-opus-4.7",
+  "fastModel": "gpt-5.5",
+  "modelEndpoints": {
+    "claude-opus-4.7": { "baseURL": "https://api.anthropic.com/v1", "authToken": "sk-ant-..." },
+    "gpt-5.5": { "baseURL": "https://api.openai.com/v1", "authToken": "sk-openai-..." }
+  }
+}
+```
+
+The same map can be supplied via the `ATLAS_MODEL_ENDPOINTS` env var as a JSON string.
 
 ## Conventions
 
