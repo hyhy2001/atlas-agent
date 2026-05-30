@@ -104,11 +104,15 @@ export function loadConfig(overrides?: Partial<Config>): Config {
   const config = ConfigSchema.parse(merged);
 
   // If no mcpServers configured, inject the default codebase-memory server
-  // using the absolute path from paths.bin() so it works from any cwd.
+  // only when the binary actually exists at paths.bin() — avoids injecting
+  // a path that doesn't exist and causing a confusing "not found" warning.
   let mcpServers = config.mcpServers;
   if (mcpServers.length === 0) {
     const defaultMcp = join(paths.bin(), "codebase-memory-mcp");
-    mcpServers = [{ name: "codebase-memory", command: defaultMcp, args: [], autoApprove: true }];
+    const defaultMcpWin = defaultMcp + ".exe";
+    if (existsSync(defaultMcp) || existsSync(defaultMcpWin)) {
+      mcpServers = [{ name: "codebase-memory", command: defaultMcp, args: [], autoApprove: true }];
+    }
   }
 
   const resolved = resolveMcpCommands(mcpServers, atlasRoot());
