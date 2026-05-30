@@ -27,6 +27,10 @@ export interface ExecutionContext {
   hooks?: HooksConfig;
   fastModel?: string;
   reasoningModel?: string;
+  // Round-robin pickers — when set, take precedence over the single-string
+  // fastModel/reasoningModel above. Each call returns the next model in the pool.
+  pickFastModel?: () => string;
+  pickReasoningModel?: () => string;
   trustedDirs?: string[];
   askUser?: (question: string, options: string[]) => Promise<string>;
 }

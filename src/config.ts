@@ -14,6 +14,13 @@ const ConfigSchema = z.object({
   model: z.string().default("all"),
   fastModel: z.string().optional(),
   reasoningModel: z.string().optional(),
+  // Round-robin pools for subagent tiers — atlas cycles through models for
+  // each delegate call. Use to load-balance across multiple API keys / providers
+  // or avoid rate limits. Takes precedence over the single-string field.
+  // Note: leader is intentionally NOT round-robin — a conversation needs a
+  // consistent model for context coherence.
+  fastModelPool: z.array(z.string()).optional(),
+  reasoningModelPool: z.array(z.string()).optional(),
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
   modelEndpoints: z.record(z.string(), z.object({

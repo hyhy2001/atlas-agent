@@ -260,6 +260,17 @@ async function main() {
   ctx.reasoningModel = config.reasoningModel;
   ctx.trustedDirs = config.trustedDirs;
 
+  // Round-robin pickers when a pool is configured for the tier.
+  const { resolveModelPicker } = await import("./provider/roundRobin.js");
+  if (config.fastModelPool?.length) {
+    ctx.pickFastModel = resolveModelPicker(config.fastModelPool);
+    console.log(`Fast model pool (round-robin): ${config.fastModelPool.join(", ")}`);
+  }
+  if (config.reasoningModelPool?.length) {
+    ctx.pickReasoningModel = resolveModelPicker(config.reasoningModelPool);
+    console.log(`Reasoning model pool (round-robin): ${config.reasoningModelPool.join(", ")}`);
+  }
+
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
   ctx.executor = executor;
 
