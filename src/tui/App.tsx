@@ -1319,16 +1319,19 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       return;
     }
 
-    // Ctrl+O: expand most recent truncated tool result
+    // Ctrl+O: toggle expand/collapse most recent truncated tool result
     if (key.ctrl && inputChar === "o") {
       setHistory(h => {
+        // If the last entry is already a tool_result_full, collapse it (toggle off)
+        if (h.length > 0 && h[h.length - 1].type === "tool_result_full") {
+          return h.slice(0, -1);
+        }
         // Find the most recent tool_result entry that has hidden content
         for (let i = h.length - 1; i >= 0; i--) {
           const entry = h[i];
           if (entry.type === "tool_result" && entry.fullText) {
             const lineCount = entry.fullText.split("\n").length;
             if (lineCount > 5) {
-              // Append a tool_result_full entry showing the complete output
               return [...h, {
                 type: "tool_result_full",
                 text: entry.fullText,
@@ -1337,7 +1340,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
                 nested: entry.nested,
               }];
             }
-            return h; // already short, nothing to expand
+            return h;
           }
         }
         return h;
@@ -1353,10 +1356,13 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         return;
       }
       const now = Date.now();
-      if (ctrlCPressedAtRef.current && now - ctrlCPressedAtRef.current < 3000) exit();
-      else {
+      if (ctrlCPressedAtRef.current && now - ctrlCPressedAtRef.current < 3000) {
+        // Auto-save session before exit so user can --resume
+        saveSession(buildSession()).catch(() => {});
+        exit();
+      } else {
         ctrlCPressedAtRef.current = now;
-        addSystem("(Press Ctrl+C again to exit)");
+        addSystem(`(Press Ctrl+C again to exit · session: ${sessionIdRef.current})`);
       }
       return;
     }
@@ -1566,6 +1572,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             <Text>{liveTail}</Text>
           </Box>
         )}
+        {isRunning && <SubagentTree tasks={agentTasks} />}
         {isRunning && (
           <SpinnerLine
             spinFrame={spinFrame}
@@ -1578,7 +1585,6 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             tip={tip}
           />
         )}
-        {isRunning && <SubagentTree tasks={agentTasks} />}
         <PromptInput
           fullWidth={fullWidth}
           gitBranch={gitBranch}
