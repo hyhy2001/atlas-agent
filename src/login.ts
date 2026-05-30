@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { createReadStream } from "node:fs";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import chalk from "chalk";
 import { paths } from "./paths.js";
 
@@ -16,14 +16,29 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
   });
 }
 
+function getLoginConfigPath(): string {
+  // Save credentials next to the binary (argv[1]) so they travel with it.
+  // Fall back to paths.config() (install dir) if argv[1] is not a real binary.
+  const script = process.argv[1];
+  if (script) {
+    const scriptDir = dirname(resolve(script));
+    // Skip dev mode (dist/cli.js or src/cli.ts)
+    const isDevCli = script.endsWith("dist/cli.js") || script.endsWith("src/cli.ts");
+    if (!isDevCli) {
+      return join(scriptDir, ".atlas", "settings.json");
+    }
+  }
+  return paths.config();
+}
+
 function makeRl(): ReturnType<typeof createInterface> {
   // Use /dev/tty so readline doesn't consume process.stdin.
-  // If stdin is closed after rl.close(), Ink can't read keyboard input → TUI hangs.
+  // terminal:false disables echo so input doesn't appear twice.
   let input: NodeJS.ReadableStream = process.stdin;
   if (process.platform !== "win32") {
     try { input = createReadStream("/dev/tty"); } catch { /* fallback */ }
   }
-  return createInterface({ input, output: process.stdout, terminal: true });
+  return createInterface({ input, output: process.stdout, terminal: false });
 }
 
 export async function interactiveLogin(): Promise<Credentials | null> {
@@ -64,12 +79,12 @@ export async function interactiveLogin(): Promise<Credentials | null> {
     }
 
     console.log("");
-    const configPath = paths.config();
+    const configPath = getLoginConfigPath();
     const save = await prompt(rl, chalk.white(`Save to ${configPath}?`) + chalk.gray(" [Y/n]: "));
     rl.close();
 
     if (save.toLowerCase() !== "n") {
-      saveCredentials({ baseURL, authToken });
+      saveCredentials({ baseURL, authToken }, configPath);
       console.log(chalk.green(`✓ Credentials saved to ${configPath}`));
     }
 
@@ -81,8 +96,7 @@ export async function interactiveLogin(): Promise<Credentials | null> {
   }
 }
 
-function saveCredentials(creds: Credentials): void {
-  const configPath = paths.config();
+function saveCredentials(creds: Credentials, configPath: string): void {
   mkdirSync(dirname(configPath), { recursive: true });
 
   let existing: Record<string, unknown> = {};
