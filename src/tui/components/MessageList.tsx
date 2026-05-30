@@ -122,8 +122,11 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             </Box>
           )}
           {entry.type === "assistant" && (
-            <Box paddingLeft={0}>
-              <Text>{entry.text}</Text>
+            <Box flexDirection="row">
+              <Text color={theme.primary}>{"● "}</Text>
+              <Box flexDirection="column" flexGrow={1}>
+                <Text>{entry.text}</Text>
+              </Box>
             </Box>
           )}
           {entry.type === "tool_call" && entry.toolName === "more" && (
