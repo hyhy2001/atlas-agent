@@ -11,11 +11,16 @@ interface MessageListProps {
 }
 
 const READ_ONLY_TOOLS = ["read_file", "grep", "glob", "list_directory", "read_many_files"];
+const COLLAPSED_TOOLS = [
+  ...READ_ONLY_TOOLS,
+  "memory_save", "memory_append", "memory_read", "memory_delete",
+  "todo_read", "todo_write",
+];
 
 // Tools whose results we collapse to a single summary line (Claude Code parity).
 // Atlas previously always showed a 5-line preview which clutters the transcript.
 function collapseSummaryFor(toolName: string | undefined, resultText: string): string | null {
-  if (!toolName || !READ_ONLY_TOOLS.includes(toolName)) return null;
+  if (!toolName || !COLLAPSED_TOOLS.includes(toolName)) return null;
   const lines = resultText.split("\n").length;
   switch (toolName) {
     case "read_file":
@@ -28,6 +33,19 @@ function collapseSummaryFor(toolName: string | undefined, resultText: string): s
       return `Found ${lines} ${lines === 1 ? "path" : "paths"}`;
     case "list_directory":
       return `Listed ${lines} ${lines === 1 ? "entry" : "entries"}`;
+    case "memory_save":
+    case "memory_append":
+      return `Wrote 1 memory`;
+    case "memory_read":
+      return `Recalled 1 memory`;
+    case "memory_delete":
+      return `Deleted 1 memory`;
+    case "todo_read":
+    case "todo_write":
+      // Try to extract count from "Updated todo list (N items)" style output
+      const match = resultText.match(/(\d+)\s*(?:item|todo)/i);
+      const count = match ? match[1] : "";
+      return count ? `Updated todo list (${count} items)` : `Updated todo list`;
     default:
       return null;
   }
