@@ -37,9 +37,12 @@ export async function runHeadless(params: {
   } = params;
 
   if (autoApprove) {
-    permissions.grant("bash");
-    permissions.grant("write_file");
-    permissions.grant("edit_file");
+    // Grant every destructive tool in the registry — hardcoding a subset
+    // (bash/write_file/edit_file) left apply_patch, git_commit, and memory_*
+    // prompting even under --yes, which stalls headless runs.
+    for (const tool of toolRegistry.getAll()) {
+      if (tool.isDestructive) permissions.grant(tool.name);
+    }
   }
 
   const messages: MessageParam[] = initialSession?.messages ?? [];

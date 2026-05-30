@@ -31,7 +31,8 @@ Rules:
 - Run build and test commands with bash after changes
 - Report: files changed, diff summary, build/test results, blockers
 - Do NOT decide architecture or expand scope beyond the plan
-- Do NOT skip build/test verification`;
+- Do NOT skip build/test verification
+- STOP when the task is done. Once tests pass and the requested change works, report and stop. Do NOT keep editing to "improve" the result — small refactors that weren't asked for are regressions.`;
 
 export const ATLAS_RESCUE_PROMPT = `You are atlas-deep, a deep investigation agent. You are called when atlas-forge has failed twice on the same task.
 
@@ -121,9 +122,11 @@ export async function runSubagent(opts: RunSubagentOptions, ctx: ExecutionContex
   const subRegistry = buildSubRegistry(opts.profile, registry);
 
   const subPermissions = new PermissionSession();
-  subPermissions.grant("bash");
-  subPermissions.grant("write_file");
-  subPermissions.grant("edit_file");
+  // Grant every destructive tool the subagent has access to. Hardcoding a
+  // subset left apply_patch, git_commit, memory_* prompting in headless flows.
+  for (const tool of subRegistry.getAll()) {
+    if (tool.isDestructive) subPermissions.grant(tool.name);
+  }
 
   const abortSignal = opts.abortSignal ?? ctx.abortSignal;
   const subCtx: ExecutionContext = {
