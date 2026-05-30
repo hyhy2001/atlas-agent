@@ -1,6 +1,27 @@
 import OpenAI from "openai";
 import type { ProviderConfig, Message, ToolDef, StreamDelta } from "./types.js";
 
+export function isStaleConnectionError(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string };
+  const code = e?.code ?? e?.cause?.code;
+  if (code === "ECONNRESET" || code === "EPIPE") return true;
+  const msg = (e?.message ?? "").toLowerCase();
+  return msg.includes("econnreset") || msg.includes("socket hang up") || msg.includes("epipe");
+}
+
+export function parseContextOverflow(err: unknown): { inputTokens: number; contextLimit: number } | null {
+  const e = err as { status?: number; message?: string };
+  if (e?.status !== 400 || !e?.message) return null;
+  const msg = e.message;
+  if (!/context|max_tokens|too long|exceed/i.test(msg)) return null;
+  const numbers = msg.match(/\d{4,}/g);
+  if (!numbers || numbers.length < 2) return null;
+  const inputTokens = parseInt(numbers[0], 10);
+  const contextLimit = parseInt(numbers[1], 10);
+  if (!Number.isFinite(inputTokens) || !Number.isFinite(contextLimit)) return null;
+  return { inputTokens, contextLimit };
+}
+
 export class OpenAIProvider {
   private client: OpenAI;
   private model: string;
@@ -21,6 +42,33 @@ export class OpenAIProvider {
 
   getModel(): string {
     return this.model;
+  }
+
+  private recreateClient(): void {
+    this.client = new OpenAI({ apiKey: this.config.apiKey, baseURL: this.config.baseURL });
+  }
+
+  private async createChatCompletion<T extends OpenAI.ChatCompletionCreateParams>(params: T): Promise<T extends { stream: true } ? AsyncIterable<OpenAI.ChatCompletionChunk> : OpenAI.ChatCompletion> {
+    try {
+      return await (this.client.chat.completions.create(params) as Promise<unknown>) as never;
+    } catch (err) {
+      if (isStaleConnectionError(err)) {
+        console.error("[atlas] Stale connection — recreating client and retrying once");
+        this.recreateClient();
+        return await (this.client.chat.completions.create(params) as Promise<unknown>) as never;
+      }
+      const overflow = parseContextOverflow(err);
+      if (overflow) {
+        const safety = 1000;
+        const newMax = Math.max(512, overflow.contextLimit - overflow.inputTokens - safety);
+        const currentMax = (params.max_tokens ?? 8192) as number;
+        if (newMax < currentMax) {
+          console.error(`[atlas] Context overflow: reducing max_tokens ${currentMax} → ${newMax}`);
+          return await (this.client.chat.completions.create({ ...params, max_tokens: newMax }) as Promise<unknown>) as never;
+        }
+      }
+      throw err;
+    }
   }
 
   async *stream(messages: Message[], tools: ToolDef[], systemPrompt?: string): AsyncGenerator<StreamDelta> {
@@ -59,7 +107,7 @@ export class OpenAIProvider {
       },
     }));
 
-    const stream = await this.client.chat.completions.create({
+    const stream = await this.createChatCompletion({
       model: this.model,
       messages: msgs,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
@@ -118,7 +166,7 @@ export class OpenAIProvider {
       msgs.push({ role: m.role as "user" | "assistant", content: m.content ?? "" });
     }
 
-    const response = await this.client.chat.completions.create({
+    const response = await this.createChatCompletion({
       model: this.model,
       messages: msgs,
       max_tokens: 2048,

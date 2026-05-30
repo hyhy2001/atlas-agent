@@ -6,6 +6,17 @@ import type { HooksConfig } from "../hooks.js";
 import { matchHooks, buildHookEnv, runHook } from "../hooks.js";
 import { isTrustedPath } from "../trust.js";
 
+// Some models (claude variants) emit a stop sequence early when they see an
+// empty tool result block, truncating the turn. Replace empty content with a
+// short marker so the model continues normally.
+export function nonEmptyContent(toolName: string, content: string): string {
+  const trimmed = content?.trim() ?? "";
+  if (!trimmed || trimmed === "[]" || trimmed === "{}") {
+    return `(${toolName} completed with no output)`;
+  }
+  return content;
+}
+
 function getToolSummary(name: string, input: unknown): string {
   const inp = input as Record<string, unknown>;
   switch (name) {
@@ -124,7 +135,7 @@ export class ToolExecutor {
             await runHook(hook, env).catch(() => {});
           }
 
-          return { ...result, toolUseId: block.id };
+          return { ...result, toolUseId: block.id, content: nonEmptyContent(block.name, result.content ?? "") };
         } catch (err) {
           spinner.fail(block.name);
           const msg = err instanceof Error ? err.message : String(err);
@@ -222,7 +233,7 @@ export class ToolExecutor {
             await runHook(hook, env).catch(() => {});
           }
 
-          return { ...result, toolUseId: block.id };
+          return { ...result, toolUseId: block.id, content: nonEmptyContent(block.name, result.content ?? "") };
         } catch (err) {
           spinner.fail(block.name);
           const msg = err instanceof Error ? err.message : String(err);
