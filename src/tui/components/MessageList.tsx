@@ -121,14 +121,23 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
               <Text bold>{entry.text}</Text>
             </Box>
           )}
-          {entry.type === "assistant" && (
-            <Box flexDirection="row">
-              <Text color={theme.primary}>{"● "}</Text>
-              <Box flexDirection="column" flexGrow={1}>
-                <Text>{entry.text}</Text>
+          {entry.type === "assistant" && (() => {
+            // Only show ● dot on the first assistant entry in a consecutive group.
+            // Multiple assistant entries from the same turn (100ms batch commits)
+            // should not each get a dot — that looks like multiple tool calls.
+            const isFirstInGroup = !prev || prev.type !== "assistant";
+            return (
+              <Box flexDirection="row">
+                {isFirstInGroup
+                  ? <Text color={theme.primary}>{"● "}</Text>
+                  : <Text>{"  "}</Text>
+                }
+                <Box flexDirection="column" flexGrow={1}>
+                  <Text>{entry.text}</Text>
+                </Box>
               </Box>
-            </Box>
-          )}
+            );
+          })()}
           {entry.type === "tool_call" && entry.toolName === "more" && (
             <Box paddingLeft={entry.nested ? 2 : 0}>
               <Text color={theme.muted} dimColor>{"  … " + (entry.text || "more")}</Text>
