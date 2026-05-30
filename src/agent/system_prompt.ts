@@ -6,6 +6,11 @@ import {
   getNumericLengthAnchorsSection,
   getMcpInstructionsSection,
   getWorkedExampleSection,
+  getDoingTasksSection,
+  getUsingToolsSection,
+  getSystemHygieneSection,
+  getCommunicationSection,
+  getSkillInvocationSection,
   getEnvSection,
   DYNAMIC_BOUNDARY,
 } from "./prompt_sections.js";
@@ -19,10 +24,15 @@ interface BuildLeaderOpts {
 export function buildLeaderPrompt(opts: BuildLeaderOpts = {}): string {
   return [
     getRoleSection("leader"),
+    getDoingTasksSection(),
+    getUsingToolsSection(),
     getToneSection(),
+    getCommunicationSection(),
     getActionsCareSection(),
     getCyberRiskSection(),
+    getSystemHygieneSection(),
     getNumericLengthAnchorsSection(),
+    getSkillInvocationSection(),
     getMcpInstructionsSection(opts.mcpStatus),
     getWorkedExampleSection("leader"),
     DYNAMIC_BOUNDARY,

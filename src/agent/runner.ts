@@ -11,6 +11,11 @@ import {
   getActionsCareSection,
   getNumericLengthAnchorsSection,
   getFaithfulReportingSection,
+  getDoingTasksSection,
+  getCommentsSection,
+  getVerificationSection,
+  getUsingToolsSection,
+  getSystemHygieneSection,
   getEnvSection,
   DYNAMIC_BOUNDARY,
 } from "./prompt_sections.js";
@@ -18,10 +23,28 @@ import {
 export type AgentProfile = "atlas-swift" | "atlas-forge" | "atlas-deep";
 
 function buildExecutorPrompt(profile: AgentProfile, model?: string): string {
+  // atlas-swift is purely mechanical — keep its prompt tight (no doing-tasks /
+  // comments / verification discipline; it just applies exact edits).
+  if (profile === "atlas-swift") {
+    return [
+      getRoleSection("atlas-swift"),
+      getNumericLengthAnchorsSection(),
+      getFaithfulReportingSection(),
+      getActionsCareSection(),
+      DYNAMIC_BOUNDARY,
+      getEnvSection({ model }),
+    ].filter(Boolean).join("\n\n");
+  }
+  // forge + deep get the full coding discipline.
   return [
     getRoleSection(profile),
+    getDoingTasksSection(),
+    getCommentsSection(),
+    getUsingToolsSection(),
+    getVerificationSection(),
     getToneSection(),
     getActionsCareSection(),
+    getSystemHygieneSection(),
     getNumericLengthAnchorsSection(),
     getFaithfulReportingSection(),
     DYNAMIC_BOUNDARY,
