@@ -17,18 +17,27 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
 }
 
 function getLoginConfigPath(): string {
-  // Save credentials next to the binary (argv[1]) so they travel with it.
-  // Fall back to paths.config() (install dir) if argv[1] is not a real binary.
-  const script = process.argv[1];
-  if (script) {
-    const scriptDir = dirname(resolve(script));
-    // Skip dev mode (dist/cli.js or src/cli.ts)
-    const isDevCli = script.endsWith("dist/cli.js") || script.endsWith("src/cli.ts");
-    if (!isDevCli) {
-      return join(scriptDir, ".atlas", "settings.json");
+  // Save credentials next to the binary so they travel with it.
+  // Bun compiled binaries have argv[1] = "/$bunfs/..." (virtual FS) — use execPath instead.
+  // Fall back to paths.config() in dev mode (dist/cli.js or src/cli.ts).
+  const script = process.argv[1] ?? "";
+  const isBunVfs = script.startsWith("/$bunfs/");
+  const isDevCli = script.endsWith("dist/cli.js") || script.endsWith("src/cli.ts");
+
+  let binaryPath: string;
+  if (isBunVfs || isDevCli) {
+    // Bun binary: use execPath (the actual binary on disk)
+    // Dev mode: fall back to install dir
+    if (isBunVfs) {
+      binaryPath = process.execPath;
+    } else {
+      return paths.config();
     }
+  } else {
+    binaryPath = script;
   }
-  return paths.config();
+
+  return join(dirname(resolve(binaryPath)), ".atlas", "settings.json");
 }
 
 function makeRl(): ReturnType<typeof createInterface> {
