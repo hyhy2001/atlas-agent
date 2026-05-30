@@ -1,5 +1,6 @@
 import React from "react";
 import { render } from "ink";
+import { PassThrough } from "node:stream";
 import chalk from "chalk";
 import { App } from "./App.js";
 import type { OpenAIProvider } from "../provider/openai.js";
@@ -10,6 +11,50 @@ import type { CustomCommand } from "../commands.js";
 import type { SubagentProfile } from "../agent/subagents.js";
 import type { HooksConfig } from "../hooks.js";
 import type { Skill } from "../skills.js";
+
+// IME compose support (Vietnamese Telex, CJK, etc.):
+// IBus / fcitx erase the preedit base character by sending DEL (0x7f)
+// immediately before the composed character — sometimes in the same chunk
+// as the composed bytes. Ink's stock tokenizer treats the whole chunk as
+// one inputChar and forwards "\x7fã"; the embedded DEL never reaches the
+// backspace handler, so the base char stays in the buffer ("Bây" → "Baây").
+//
+// Mirror the cc-ref approach: split each chunk so embedded DEL bytes are
+// emitted as their own events. Ink then parses each DEL into key.backspace
+// independently of the composed character that follows.
+function createImeAwareStdin(real: NodeJS.ReadStream): NodeJS.ReadStream {
+  const proxy: PassThrough & {
+    isTTY?: boolean;
+    setRawMode?: NodeJS.ReadStream["setRawMode"];
+    isRaw?: boolean;
+    ref?: () => void;
+    unref?: () => void;
+  } = new PassThrough();
+
+  proxy.isTTY = real.isTTY;
+  proxy.setRawMode = (mode: boolean) => {
+    real.setRawMode?.(mode);
+    return real as unknown as NodeJS.ReadStream;
+  };
+  proxy.ref = () => real.ref();
+  proxy.unref = () => real.unref();
+
+  real.on("data", (chunk: Buffer | string) => {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+    let start = 0;
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] === 0x7f) {
+        if (i > start) proxy.write(buf.slice(start, i));
+        proxy.write(Buffer.from([0x7f]));
+        start = i + 1;
+      }
+    }
+    if (start < buf.length) proxy.write(buf.slice(start));
+  });
+  real.on("end", () => proxy.end());
+
+  return proxy as unknown as NodeJS.ReadStream;
+}
 
 function buildBanner(leaderTools: number, totalTools: number, model: string): string {
   const cols = process.stdout.columns ?? 100;
@@ -91,6 +136,7 @@ export async function startTui(params: {
   process.env.__ATLAS_INK_MODE = "1";
   const leaderTools = params.toolRegistry.getAll().length;
   const bannerText = buildBanner(leaderTools, params.totalToolCount ?? leaderTools, params.provider.getModel());
+  const imeStdin = createImeAwareStdin(process.stdin as NodeJS.ReadStream);
   const { waitUntilExit } = render(
     <App
       bannerText={bannerText}
@@ -109,7 +155,8 @@ export async function startTui(params: {
       startInPlanMode={params.startInPlanMode}
       skills={params.skills}
       theme={params.theme}
-    />
+    />,
+    { stdin: imeStdin }
   );
   await waitUntilExit();
 }
