@@ -44,20 +44,19 @@ export function PromptInput({
 
   return (
     <>
-      <Box flexDirection="column" width={fullWidth}>
+      <Box flexDirection="column">
         <Box>
-          <Text color={theme.muted} dimColor>{"╭" + "─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 4 : 2)))}</Text>
-          {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─"}</Text>}
+          <Text color={theme.muted} dimColor>{"╭" + "─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 2 : 1)))}</Text>
+          {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─╮"}</Text>}
           {!gitBranch && <Text color={theme.muted} dimColor>{"╮"}</Text>}
-          {gitBranch && <Text color={theme.muted} dimColor>{"╮"}</Text>}
         </Box>
-        <Box paddingX={2}>
+        <Box paddingX={1}>
           <Text color={theme.muted}>{prefix}</Text>
           <Text>{input}</Text>
           <Text color={theme.muted}>█</Text>
         </Box>
         {queuedMessage && (
-          <Box paddingX={2}>
+          <Box paddingX={1}>
             <Text color={theme.warning} dimColor>{"⏎ queued: "}</Text>
             <Text color={theme.muted} dimColor>{queuedMessage.length > 60 ? queuedMessage.slice(0, 60) + "…" : queuedMessage}</Text>
           </Box>
