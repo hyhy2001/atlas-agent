@@ -110,7 +110,13 @@ export function PromptInput({
         </Box>
         <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
           <Text color={theme.muted} dimColor>Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
-          <Text color={permMode === "plan" ? "yellow" : permMode === "auto" ? "green" : "gray"} dimColor>shift+tab · {permModeLabels[permMode]}</Text>
+          {permMode === "auto" ? (
+            <Text color="green">⏵⏵ accept edits on <Text dimColor>(shift+tab to cycle)</Text></Text>
+          ) : permMode === "plan" ? (
+            <Text color="yellow">⏸ plan mode on <Text dimColor>(shift+tab to cycle)</Text></Text>
+          ) : (
+            <Text color={theme.muted} dimColor>shift+tab · {permModeLabels[permMode]}</Text>
+          )}
         </Box>
       </Box>
       <Box paddingX={1}>

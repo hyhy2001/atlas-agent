@@ -10,6 +10,29 @@ interface MessageListProps {
   outputStyle?: "default" | "compact" | "verbose";
 }
 
+const READ_ONLY_TOOLS = ["read_file", "grep", "glob", "list_directory", "read_many_files"];
+
+// Tools whose results we collapse to a single summary line (Claude Code parity).
+// Atlas previously always showed a 5-line preview which clutters the transcript.
+function collapseSummaryFor(toolName: string | undefined, resultText: string): string | null {
+  if (!toolName || !READ_ONLY_TOOLS.includes(toolName)) return null;
+  const lines = resultText.split("\n").length;
+  switch (toolName) {
+    case "read_file":
+      return `Read 1 file (${lines} lines)`;
+    case "read_many_files":
+      return `Read files (${lines} lines)`;
+    case "grep":
+      return `Searched: ${lines} ${lines === 1 ? "match" : "matches"}`;
+    case "glob":
+      return `Found ${lines} ${lines === 1 ? "path" : "paths"}`;
+    case "list_directory":
+      return `Listed ${lines} ${lines === 1 ? "entry" : "entries"}`;
+    default:
+      return null;
+  }
+}
+
 // Group ≥3 consecutive tool_call entries with the same toolName into one
 // "tool_group" entry. Read 5 files in a row → "● Read × 5" instead of 5
 // separate lines. Tool results stay separate so output is still readable.
@@ -23,7 +46,7 @@ export function groupConsecutiveToolCalls(history: HistoryEntry[]): HistoryEntry
       entry.toolName !== "more" &&
       entry.toolName &&
       // Only group "noisy" read-only tools — never edits or bash
-      ["read_file", "grep", "glob", "list_directory", "read_many_files"].includes(entry.toolName)
+      READ_ONLY_TOOLS.includes(entry.toolName)
     ) {
       // Look ahead: collect consecutive same-tool entries (allowing tool_result between)
       const groupName = entry.toolName;
@@ -97,6 +120,19 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             <DiffBlock text={entry.text} nested={entry.nested} />
           )}
           {entry.type === "tool_result" && !isDiffOutput(entry.text) && (() => {
+            // For read-only tools, collapse to a 1-line summary (Claude Code parity).
+            // User can Ctrl+O to expand.
+            const summary = outputStyle !== "verbose"
+              ? collapseSummaryFor(entry.toolName, entry.text)
+              : null;
+            if (summary) {
+              return (
+                <Box paddingLeft={entry.nested ? 4 : 2}>
+                  <Text color={theme.success}>{"⎿  "}</Text>
+                  <Text color={theme.muted} dimColor>{summary + " (ctrl+o to expand)"}</Text>
+                </Box>
+              );
+            }
             const maxLines = outputStyle === "verbose" ? 999 : outputStyle === "compact" ? 1 : 5;
             const { preview, hidden } = formatToolResult(entry.text, maxLines);
             const lines = preview.split("\n");

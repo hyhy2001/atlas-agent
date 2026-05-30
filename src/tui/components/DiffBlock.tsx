@@ -17,11 +17,16 @@ export function DiffBlock({ text, nested }: DiffBlockProps) {
   const maxLines = 40;
   const visibleLines = lines.slice(0, maxLines);
   const hiddenCount = lines.length - visibleLines.length;
+  const added = lines.filter(l => l.type === "add").length;
+  const removed = lines.filter(l => l.type === "remove").length;
   return (
     <Box flexDirection="column" paddingLeft={indent}>
       <Box>
         <Text color={theme.success}>{"⎿  "}</Text>
         <Text bold>{header}</Text>
+      </Box>
+      <Box paddingLeft={3}>
+        <Text color={theme.muted} dimColor>{`Added ${added} ${added === 1 ? "line" : "lines"}, removed ${removed} ${removed === 1 ? "line" : "lines"}`}</Text>
       </Box>
       {visibleLines.map((line, i) => {
         const lineNumStr = line.lineNum !== undefined ? String(line.lineNum).padStart(4, " ") : "    ";
