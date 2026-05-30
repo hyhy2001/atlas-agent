@@ -1579,23 +1579,23 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
           />
         )}
         {isRunning && <SubagentTree tasks={agentTasks} />}
-        {!isRunning && (
-          <PromptInput
-            fullWidth={fullWidth}
-            gitBranch={gitBranch}
-            planActive={planActive}
-            multiline={multiline}
-            input={input}
-            slashCmds={slashCmds}
-            slashCmdIndex={slashCmdIndex}
-            atSuggestions={atSuggestions}
-            atSuggestionIndex={atSuggestionIndex}
-            permMode={permMode}
-            permModeLabels={PERM_MODE_LABELS}
-            tokens={tokens}
-            modelName={props.provider.getModel()}
-          />
-        )}
+        <PromptInput
+          fullWidth={fullWidth}
+          gitBranch={gitBranch}
+          planActive={planActive}
+          multiline={multiline}
+          input={input}
+          slashCmds={slashCmds}
+          slashCmdIndex={slashCmdIndex}
+          atSuggestions={atSuggestions}
+          atSuggestionIndex={atSuggestionIndex}
+          permMode={permMode}
+          permModeLabels={PERM_MODE_LABELS}
+          tokens={tokens}
+          modelName={props.provider.getModel()}
+          isRunning={isRunning}
+          queuedMessage={queuedMessage}
+        />
       </Box>
     </ThemeContext.Provider>
   );

@@ -18,6 +18,8 @@ interface PromptInputProps {
   permModeLabels: Record<"ask" | "auto" | "plan", string>;
   tokens: { input: number; output: number };
   modelName: string;
+  isRunning?: boolean;
+  queuedMessage?: string | null;
 }
 
 export function PromptInput({
@@ -34,6 +36,8 @@ export function PromptInput({
   permModeLabels,
   tokens,
   modelName,
+  isRunning = false,
+  queuedMessage = null,
 }: PromptInputProps) {
   const theme = useTheme();
   const prefix = planActive ? "[plan] " : multiline ? "[multiline] " : "❯ ";
@@ -46,10 +50,16 @@ export function PromptInput({
           {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─"}</Text>}
         </Box>
         <Box paddingX={1}>
-          <Text color={theme.primary} bold>{prefix}</Text>
+          <Text color={theme.muted}>{prefix}</Text>
           <Text>{input}</Text>
           <Text color={theme.muted}>█</Text>
         </Box>
+        {queuedMessage && (
+          <Box paddingX={1}>
+            <Text color={theme.warning} dimColor>{"⏎ queued: "}</Text>
+            <Text color={theme.muted} dimColor>{queuedMessage.length > 60 ? queuedMessage.slice(0, 60) + "…" : queuedMessage}</Text>
+          </Box>
+        )}
         {input.startsWith("/") && input.length >= 1 && (
           <Box flexDirection="column" paddingX={2}>
             {slashCmds.map((m, i) => (
@@ -89,7 +99,11 @@ export function PromptInput({
           <Text color={theme.muted} dimColor>{"─".repeat(fullWidth)}</Text>
         </Box>
         <Box paddingX={1} justifyContent="space-between" width={fullWidth}>
-          <Text color={theme.muted} dimColor>Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit</Text>
+          <Text color={theme.muted} dimColor>{
+            isRunning
+              ? "↵ · queue message  Ctrl+C · interrupt  Ctrl+O · expand"
+              : "Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit"
+          }</Text>
           {permMode === "auto" ? (
             <Text color="green">⏵⏵ accept edits on <Text dimColor>(shift+tab to cycle)</Text></Text>
           ) : permMode === "plan" ? (
