@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { formatApiError } from '../src/tui/App.js';
+import { formatToolName } from '../src/tui/format.js';
+
+describe('formatToolName edge cases', () => {
+  it('returns "Tool" for empty string', () => {
+    expect(formatToolName('')).toBe('Tool');
+  });
+  it('handles undefined-coerced empty', () => {
+    expect(formatToolName(undefined)).toBe('Tool');
+  });
+  it('formats MCP tool names cleanly', () => {
+    expect(formatToolName('codebase-memory__search_graph')).toBe('SearchGraph');
+    expect(formatToolName('codebase-memory__index_status')).toBe('IndexStatus');
+  });
+  it('preserves built-in mappings', () => {
+    expect(formatToolName('read_file')).toBe('Read');
+    expect(formatToolName('bash')).toBe('Bash');
+  });
+  it('does not crash on consecutive underscores or trailing underscore', () => {
+    expect(formatToolName('a__b')).toBe('B');
+    expect(formatToolName('foo_')).toBe('Foo');
+  });
+});
 
 describe('formatApiError', () => {
   it('formats rate limit 429', () => {

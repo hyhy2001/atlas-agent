@@ -55,7 +55,14 @@ export function formatToolName(name: string): string {
     memory_append: "Memory",
     analyze_log: "Analyze",
   };
-  return map[name] ?? name.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join("");
+  if (!name) return "Tool";
+  if (map[name]) return map[name];
+  // MCP tools: "server__tool_name" → show just the tool part, capitalized
+  if (name.includes("__")) {
+    const toolPart = name.split("__").slice(1).join("__");
+    return toolPart.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : "").join("");
+  }
+  return name.split("_").map(w => w ? w[0].toUpperCase() + w.slice(1) : "").join("");
 }
 
 export function formatToolResult(text: string, maxLines = 5): { preview: string; hidden: number } {
