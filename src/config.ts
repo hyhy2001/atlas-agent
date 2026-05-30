@@ -19,9 +19,7 @@ const ConfigSchema = z.object({
   systemPrompt: z.string().optional(),
   theme: z.enum(["dark", "light", "monokai", "solarized"]).default("dark"),
   trustedDirs: z.array(z.string()).default([]),
-  mcpServers: z.array(McpServerSchema).default([
-    { name: "codebase-memory", command: "./.atlas/bin/codebase-memory-mcp", args: [], autoApprove: true },
-  ]),
+  mcpServers: z.array(McpServerSchema).default([]),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -105,6 +103,14 @@ export function loadConfig(overrides?: Partial<Config>): Config {
 
   const config = ConfigSchema.parse(merged);
 
-  const resolved = resolveMcpCommands(config.mcpServers, atlasRoot());
+  // If no mcpServers configured, inject the default codebase-memory server
+  // using the absolute path from paths.bin() so it works from any cwd.
+  let mcpServers = config.mcpServers;
+  if (mcpServers.length === 0) {
+    const defaultMcp = join(paths.bin(), "codebase-memory-mcp");
+    mcpServers = [{ name: "codebase-memory", command: defaultMcp, args: [], autoApprove: true }];
+  }
+
+  const resolved = resolveMcpCommands(mcpServers, atlasRoot());
   return { ...config, mcpServers: resolved };
 }
