@@ -84,7 +84,13 @@ export async function runAgentLoop(params: {
       else process.stdout.write(flushed);
     }
 
-    totalInputTokens += estimateTokens(JSON.stringify(messages));
+    // Estimate input tokens: messages + system prompt + tool schemas.
+    // Previously only messages were counted, causing the TUI to show ~13↑
+    // even with a 2000-token system prompt.
+    const toolsJson = JSON.stringify(tools);
+    totalInputTokens += estimateTokens(JSON.stringify(messages))
+      + estimateTokens(systemPrompt ?? "")
+      + estimateTokens(toolsJson);
     totalOutputTokens += estimateTokens(assistantContent + JSON.stringify(toolCalls));
 
     const assistantMsg: MessageParam = {
