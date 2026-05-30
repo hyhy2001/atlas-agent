@@ -3,6 +3,9 @@ import type { OpenAIProvider } from "../provider/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import { MarkdownRenderer } from "../markdown.js";
+import { estimateTokens } from "../utils/tokenEstimation.js";
+import { offloadIfLarge } from "../utils/toolResultStorage.js";
+import { getCachedTools } from "../utils/toolSchemaCache.js";
 
 export interface LoopResult {
   inputTokens: number;
@@ -27,7 +30,7 @@ export async function runAgentLoop(params: {
   while (true) {
     if (abortSignal.aborted) return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
 
-    const tools = toolRegistry.toOpenAITools();
+    const tools = getCachedTools(toolRegistry.toOpenAITools());
     const toolCalls: ToolCall[] = [];
     let currentToolCall: { id: string; name: string; args: string } | null = null;
     let assistantContent = "";
@@ -81,8 +84,8 @@ export async function runAgentLoop(params: {
       else process.stdout.write(flushed);
     }
 
-    totalInputTokens += Math.ceil(JSON.stringify(messages).length / 4);
-    totalOutputTokens += Math.ceil((assistantContent.length + JSON.stringify(toolCalls).length) / 4);
+    totalInputTokens += estimateTokens(JSON.stringify(messages));
+    totalOutputTokens += estimateTokens(assistantContent + JSON.stringify(toolCalls));
 
     const assistantMsg: MessageParam = {
       role: "assistant",
@@ -102,9 +105,10 @@ export async function runAgentLoop(params: {
     const results = await executor.execute(toolBlocks);
 
     for (const result of results) {
+      const content = await offloadIfLarge(result.toolUseId, result.content);
       messages.push({
         role: "tool",
-        content: result.content,
+        content,
         tool_call_id: result.toolUseId,
       });
     }
