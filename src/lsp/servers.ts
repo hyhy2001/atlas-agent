@@ -1,6 +1,8 @@
 import { promisify } from "node:util";
 import { exec } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, chmodSync, createWriteStream } from "node:fs";
+import { createGunzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import which from "which";
 import { paths } from "../paths.js";
@@ -11,15 +13,36 @@ function lspDir(): string {
   return path.join(paths.bin(), "lsp");
 }
 
+function rustTargetTriple(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+  if (platform === "linux" && arch === "x64") return "x86_64-unknown-linux-gnu";
+  if (platform === "linux" && arch === "arm64") return "aarch64-unknown-linux-gnu";
+  if (platform === "darwin" && arch === "x64") return "x86_64-apple-darwin";
+  if (platform === "darwin" && arch === "arm64") return "aarch64-apple-darwin";
+  if (platform === "win32" && arch === "x64") return "x86_64-pc-windows-msvc";
+  if (platform === "win32" && arch === "arm64") return "aarch64-pc-windows-msvc";
+  throw new Error(`Unsupported platform/arch for rust-analyzer: ${platform}/${arch}`);
+}
+
+interface GithubReleaseAsset {
+  name: string;
+  url: string;             // download url template, with {triple} placeholder
+  archive?: "gz";          // unwrap if gzipped
+  binaryName: string;      // final binary name placed under lspDir
+}
+
 export interface ServerConfig {
   language: string;
   extensions: string[];
   command: string;
   args: string[];
-  installType?: "npm" | "pip" | "rustup";
+  installType?: "npm" | "pip" | "github-release";
   npmPackages?: string[];
   pipPackage?: string;
-  rustupComponent?: string;
+  githubRepo?: string;
+  githubAsset?: string;
+  githubArchive?: "gz";
   installHint?: string;
   rootMarkers: string[];
 }
@@ -81,9 +104,11 @@ export const SERVERS: ServerConfig[] = [
     extensions: [".rs"],
     command: "rust-analyzer",
     args: [],
-    installType: "rustup",
-    rustupComponent: "rust-analyzer",
-    installHint: "Install rust-analyzer: rustup component add rust-analyzer",
+    installType: "github-release",
+    githubRepo: "rust-lang/rust-analyzer",
+    githubAsset: "rust-analyzer-{triple}.gz",
+    githubArchive: "gz",
+    installHint: "Install rust-analyzer from https://github.com/rust-lang/rust-analyzer/releases or via rustup component add rust-analyzer",
     rootMarkers: ["Cargo.toml", ".git"],
   },
   {
@@ -129,12 +154,52 @@ export async function resolveServerCommand(cfg: ServerConfig): Promise<string | 
   if (existsSync(npmLocal)) return npmLocal;
   const pipLocal = path.join(dir, "pyvenv", "bin", cfg.command);
   if (existsSync(pipLocal)) return pipLocal;
+  // github-release binaries are placed directly under lspDir
+  const ghLocal = path.join(dir, cfg.command);
+  if (existsSync(ghLocal)) return ghLocal;
   try {
     const resolved = await which(cfg.command);
     return resolved;
   } catch {
     return null;
   }
+}
+
+interface GithubReleaseInfo {
+  tag_name: string;
+  assets: Array<{ name: string; browser_download_url: string }>;
+}
+
+async function downloadGithubRelease(cfg: ServerConfig, dir: string): Promise<string> {
+  if (!cfg.githubRepo || !cfg.githubAsset) {
+    throw new Error("github-release config missing githubRepo/githubAsset");
+  }
+  const triple = rustTargetTriple();
+  const assetName = cfg.githubAsset.replace("{triple}", triple);
+
+  // Fetch latest release metadata
+  const apiUrl = `https://api.github.com/repos/${cfg.githubRepo}/releases/latest`;
+  const res = await fetch(apiUrl, { headers: { "User-Agent": "atlas-agent", Accept: "application/vnd.github+json" } });
+  if (!res.ok) throw new Error(`GitHub API ${res.status} for ${apiUrl}`);
+  const info = (await res.json()) as GithubReleaseInfo;
+  const asset = info.assets.find(a => a.name === assetName);
+  if (!asset) throw new Error(`Asset ${assetName} not found in ${cfg.githubRepo} ${info.tag_name}`);
+
+  // Download the asset
+  const dlRes = await fetch(asset.browser_download_url, { headers: { "User-Agent": "atlas-agent" } });
+  if (!dlRes.ok || !dlRes.body) throw new Error(`Download failed: ${dlRes.status}`);
+
+  const binPath = path.join(dir, cfg.command);
+  const { Readable } = await import("node:stream");
+  const nodeStream = Readable.fromWeb(dlRes.body as Parameters<typeof Readable.fromWeb>[0]);
+
+  if (cfg.githubArchive === "gz") {
+    await pipeline(nodeStream, createGunzip(), createWriteStream(binPath));
+  } else {
+    await pipeline(nodeStream, createWriteStream(binPath));
+  }
+  chmodSync(binPath, 0o755);
+  return binPath;
 }
 
 export interface InstallResult { ok: boolean; command?: string; installed?: boolean; error?: string }
@@ -159,13 +224,8 @@ export async function ensureServerInstalled(cfg: ServerConfig): Promise<InstallR
         await execAsync(`python3 -m venv "${venv}"`, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
       }
       await execAsync(`"${path.join(venv, "bin", "pip")}" install ${cfg.pipPackage}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
-    } else if (cfg.installType === "rustup") {
-      try {
-        await which("rustup");
-      } catch {
-        return { ok: false, error: cfg.installHint ?? "rustup not found — install Rust from https://rustup.rs first" };
-      }
-      await execAsync(`rustup component add ${cfg.rustupComponent}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+    } else if (cfg.installType === "github-release") {
+      await downloadGithubRelease(cfg, dir);
     }
     const resolved = await resolveServerCommand(cfg);
     if (!resolved) {
@@ -180,7 +240,7 @@ export async function ensureServerInstalled(cfg: ServerConfig): Promise<InstallR
     } else if (cfg.installType === "pip") {
       manualCmd = `python3 -m venv "${path.join(dir, "pyvenv")}" && "${path.join(dir, "pyvenv", "bin", "pip")}" install ${cfg.pipPackage}`;
     } else {
-      manualCmd = `rustup component add ${cfg.rustupComponent}`;
+      manualCmd = cfg.installHint ?? `Install ${cfg.command} manually`;
     }
     return { ok: false, error: `Failed to install ${cfg.command}: ${msg}\nTry manually: ${manualCmd}` };
   }
