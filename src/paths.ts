@@ -60,6 +60,7 @@ export const paths = {
   bin:        () => join(atlasRoot(), ".atlas", "bin"),
   commands:   () => join(atlasRoot(), ".atlas", "commands"),
   agents:     () => join(atlasRoot(), ".atlas", "agents"),
+  skills:     () => join(atlasRoot(), ".atlas", "skills"),
 
   // Project-level (per-project, based on cwd)
   project:    () => projectRoot(),

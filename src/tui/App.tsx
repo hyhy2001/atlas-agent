@@ -30,6 +30,7 @@ import { SubagentTree } from "./components/SubagentTree.js";
 import { PromptInput } from "./components/PromptInput.js";
 import { THEMES, ThemeContext, type ThemeName } from "./theme.js";
 import type { HistoryEntry, OverlayItem, AgentTask } from "./types.js";
+import type { Skill } from "../skills.js";
 
 interface AppProps {
   provider: OpenAIProvider;
@@ -45,6 +46,7 @@ interface AppProps {
   fastModel?: string;
   startInPlanMode?: boolean;
   bannerText?: string;
+  skills?: Skill[];
   mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }
 
@@ -65,7 +67,7 @@ const TIPS = [
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
-  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "exit", "quit",
+  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "skills", "exit", "quit",
 ];
 
 interface AtSuggestion { path: string; indices?: number[] }
@@ -253,7 +255,8 @@ export const App: React.FC<AppProps> = (props) => {
       "/help","/save","/sessions","/load","/resume","/clear","/context",
       "/plan","/execute","/compact","/cost","/stats","/init","/bg",
       "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/mcp",
-      "/worktree","/trust","/tasks","/cron","/team",
+      "/worktree","/trust","/tasks","/cron","/team","/skills",
+      ...(props.skills ?? []).map(s => `/${s.name}`),
       ...(props.commands ?? []).map(c => `/${c.name}`),
     ];
     return allCmds.filter(c => c.startsWith(input)).slice(0, 8);
@@ -1054,6 +1057,18 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         });
         addSystem(`Teams (${teams.length}):\n${lines.join("\n")}`);
       }
+      return true;
+    }
+    if (value === "/skills") {
+      const list = props.skills ?? [];
+      if (list.length === 0) addSystem("No skills loaded.");
+      else addSystem("Skills:\n" + list.map(s => `  /${s.name} — ${s.description}`).join("\n"));
+      return true;
+    }
+    const skillMatch = (props.skills ?? []).find(s => value === `/${s.name}` || value.startsWith(`/${s.name} `));
+    if (skillMatch) {
+      const args = value.slice(skillMatch.name.length + 1).trim();
+      await runPrompt(`The user invoked the /${skillMatch.name} skill${args ? ` with: ${args}` : ""}. Apply its workflow.`);
       return true;
     }
     const withoutSlash = value.slice(1);

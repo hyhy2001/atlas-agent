@@ -9,6 +9,7 @@ import type { Session } from "../sessions.js";
 import type { CustomCommand } from "../commands.js";
 import type { SubagentProfile } from "../agent/subagents.js";
 import type { HooksConfig } from "../hooks.js";
+import type { Skill } from "../skills.js";
 
 function buildBanner(leaderTools: number, totalTools: number, model: string): string {
   const cols = process.stdout.columns ?? 100;
@@ -83,6 +84,7 @@ export async function startTui(params: {
   totalToolCount?: number;
   fastModel?: string;
   startInPlanMode?: boolean;
+  skills?: Skill[];
   mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }): Promise<void> {
   process.env.__ATLAS_INK_MODE = "1";
@@ -104,6 +106,7 @@ export async function startTui(params: {
       totalToolCount={params.totalToolCount}
       fastModel={params.fastModel}
       startInPlanMode={params.startInPlanMode}
+      skills={params.skills}
     />
   );
   await waitUntilExit();

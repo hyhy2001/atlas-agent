@@ -278,6 +278,14 @@ async function main() {
     console.log(`Loaded ${commands.length} custom commands`);
   }
 
+  // Load skills and inject their workflows into the system prompt
+  const { loadSkills, formatSkillsForSystemPrompt } = await import("./skills.js");
+  const skills = await loadSkills(process.cwd());
+  if (skills.length > 0) {
+    systemPrompt += formatSkillsForSystemPrompt(skills);
+    console.log(`Loaded ${skills.length} skills`);
+  }
+
   const customAgents = await loadCustomSubagents(process.cwd());
   const map = new Map<string, import("./agent/subagents.js").SubagentProfile>();
   for (const a of BUILTIN_SUBAGENTS) map.set(a.name, a);
@@ -317,6 +325,7 @@ async function main() {
           hooks,
           totalToolCount: toolRegistry.getAll().length,
           mcpStatus,
+          skills,
         });
       } else {
         await startRepl({
