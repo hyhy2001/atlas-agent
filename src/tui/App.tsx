@@ -473,21 +473,24 @@ export const App: React.FC<AppProps> = (props) => {
       nestedCallCountRef.current = 0;
       (props.executor as any)._onToolCall = (name: string, summary: string, nested = false) => {
         if (nested) {
+          // Don't dump child tool calls into the scrollback — cc-ref-style
+          // shows only one tree line per subagent. Track count + last tool
+          // info on the agentTasks entry so SubagentTree can render it.
           nestedCallCountRef.current++;
-          const n = nestedCallCountRef.current;
-          // Show first 5 nested calls; emit a single "more" line on the 6th, suppress rest.
-          // Final total is shown in the Done summary line ("Done (N tool uses · ...)")
-          if (n <= 5) {
-            setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
-          } else if (n === 6) {
-            setHistory(h => [...h, { type: "tool_call", text: "more tool calls hidden — see Done summary", toolName: "more", nested }]);
-          }
+          setAgentTasks(tasks => {
+            const last = [...tasks].reverse().find(t => t.status === "running");
+            if (!last) return tasks;
+            return tasks.map(t => t === last
+              ? { ...t, toolUses: (t.toolUses ?? 0) + 1, lastToolInfo: summary ? `${name}(${summary})` : name }
+              : t);
+          });
           return;
         }
         setHistory(h => [...h, { type: "tool_call", text: summary, toolName: name, nested }]);
         setCurrentToolName(name);
       };
       (props.executor as any)._onToolResult = (name: string, resultStr: string, isError: boolean, nested = false) => {
+        if (nested) return;  // child results stay inside the agent's tree, not scrollback
         setHistory(h => [...h, { type: "tool_result", text: resultStr, fullText: resultStr, toolName: name, isError, nested }]);
       };
       (props.executor as any)._onSubagentDone = (agentName: string, toolUses: number, tokens: number, durationMs: number) => {

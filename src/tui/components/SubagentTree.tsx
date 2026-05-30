@@ -26,7 +26,7 @@ export function SubagentTree({ tasks }: SubagentTreeProps) {
         const isError = task.status === "error";
 
         const statusText = isRunning
-          ? "Running…"
+          ? (task.lastToolInfo || "Initializing…")
           : isError ? "Error" : "Done";
 
         const dur = task.durationMs !== undefined
@@ -40,7 +40,7 @@ export function SubagentTree({ tasks }: SubagentTreeProps) {
               tools > 0 ? `${tools} tool ${tools === 1 ? "use" : "uses"}` : "",
               tokens > 0 ? `${formatTokenCount(tokens)} tokens` : "",
             ].filter(Boolean).join(" \xB7 ")
-          : "";
+          : tools > 0 ? `${tools} tool ${tools === 1 ? "use" : "uses"}` : "";
 
         return (
           <Box key={task.id} flexDirection="column">

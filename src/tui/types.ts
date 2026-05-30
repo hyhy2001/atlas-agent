@@ -21,4 +21,5 @@ export interface AgentTask {
   durationMs?: number;
   toolUses?: number;
   tokens?: number;
+  lastToolInfo?: string;
 }
