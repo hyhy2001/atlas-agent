@@ -68,7 +68,7 @@ const TIPS = [
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
-  "version", "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "skills", "exit", "quit",
+  "version", "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "config", "worktree", "trust", "tasks", "cron", "team", "skills", "exit", "quit",
 ];
 
 interface AtSuggestion { path: string; indices?: number[] }
@@ -169,6 +169,8 @@ export const App: React.FC<AppProps> = (props) => {
   const historyIndexRef = useRef<number>(-1);
   const savedInputRef = useRef<string>("");
   const pasteNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pasteRefsRef = useRef<Map<string, string>>(new Map());
+  const pasteCounterRef = useRef(0);
   const queuedMessageRef = useRef<string | null>(null);
   const handleSubmitRef = useRef<(value: string) => Promise<void>>(async () => {});
 
@@ -275,7 +277,7 @@ export const App: React.FC<AppProps> = (props) => {
     const allCmds = [
       "/help","/save","/sessions","/load","/resume","/clear","/context",
       "/plan","/execute","/compact","/cost","/stats","/version","/init","/bg",
-      "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/mcp",
+      "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/config","/mcp",
       "/worktree","/trust","/tasks","/cron","/team","/skills",
       ...(props.skills ?? []).map(s => `/${s.name}`),
       ...(props.commands ?? []).map(c => `/${c.name}`),
@@ -626,8 +628,59 @@ export const App: React.FC<AppProps> = (props) => {
       addSystem("History cleared. Starting fresh session.");
       return true;
     }
+    if (value === "/config") {
+      const mainModel = props.provider.getModel();
+      const fastModel = fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? "(uses main)";
+      const reasoningModel = reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? "(uses main)";
+      const mcpCount = props.mcpStatus?.filter(m => m.status === "connected").length ?? 0;
+      const lines = [
+        `Atlas configuration:`,
+        ``,
+        `Models:`,
+        `  leader:    ${mainModel}`,
+        `  fast:      ${fastModel}`,
+        `  reasoning: ${reasoningModel}`,
+        ``,
+        `Session:`,
+        `  theme:        ${themeName}`,
+        `  output style: ${outputStyle}`,
+        `  permission:   ${PERM_MODE_LABELS[permMode]}`,
+        `  plan mode:    ${planActive ? "on" : "off"}`,
+        ``,
+        `Tools & extensions:`,
+        `  leader tools: ${props.toolRegistry.getAll().length}`,
+        `  total tools:  ${props.totalToolCount ?? props.toolRegistry.getAll().length}`,
+        `  MCP servers:  ${mcpCount} connected`,
+        `  skills:       ${props.skills?.length ?? 0}`,
+        `  subagents:    ${(props.subagents ?? []).length}`,
+        ``,
+        `Change: /model · /theme · /output · shift+tab (permission)`,
+      ];
+      addSystem(lines.join("\n"));
+      return true;
+    }
     if (value === "/context") {
-      addSystem(props.projectContextPath ? `Project context: ${props.projectContextPath}` : "No project context loaded");
+      const CONTEXT_LIMIT = 200_000;
+      const sysTokens = Math.ceil((props.systemPrompt?.length ?? 0) / 4);
+      const msgTokens = Math.ceil(JSON.stringify(messagesRef.current).length / 4);
+      const toolTokens = Math.ceil(JSON.stringify(props.toolRegistry.getAll().map(t => ({ n: t.name, d: t.description, s: t.inputSchema }))).length / 4);
+      const used = sysTokens + msgTokens + toolTokens;
+      const pct = Math.min(100, Math.round((used / CONTEXT_LIMIT) * 100));
+      const barWidth = 30;
+      const filled = Math.round((pct / 100) * barWidth);
+      const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+      const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+      const lines = [
+        `Context usage: ${bar} ${pct}%  (${fmt(used)} / ${fmt(CONTEXT_LIMIT)})`,
+        ``,
+        `  System prompt: ${fmt(sysTokens)} tokens`,
+        `  Messages (${messagesRef.current.length}): ${fmt(msgTokens)} tokens`,
+        `  Tool schemas (${props.toolRegistry.getAll().length}): ${fmt(toolTokens)} tokens`,
+        ``,
+        props.projectContextPath ? `Project context: ${props.projectContextPath}` : `No project context (run /init)`,
+        pct > 70 ? `\n⚠ Context >70% — consider /compact to free space.` : ``,
+      ].filter(Boolean);
+      addSystem(lines.join("\n"));
       return true;
     }
     if (value === "/plan") {
@@ -947,15 +1000,27 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     }
     if (value === "/diff" || value.startsWith("/diff ")) {
       const arg = value.slice(5).trim();
-      const args = ["diff", "--color=always", ...(arg ? ["--", arg] : [])];
-      const output = await new Promise<string>(resolve => {
-        const child = spawn("git", args, { cwd: process.cwd() });
+      // Get file-level summary first (--stat), then full diff
+      const stat = await new Promise<string>(resolve => {
+        const child = spawn("git", ["diff", "--stat", ...(arg ? ["--", arg] : [])], { cwd: process.cwd() });
+        let out = "";
+        child.stdout.on("data", d => { out += d.toString(); });
+        child.on("close", () => resolve(out.trim()));
+      });
+      const full = await new Promise<string>(resolve => {
+        const child = spawn("git", ["diff", "--color=always", ...(arg ? ["--", arg] : [])], { cwd: process.cwd() });
         let out = "";
         child.stdout.on("data", d => { out += d.toString(); });
         child.stderr.on("data", d => { out += d.toString(); });
         child.on("close", () => resolve(out));
       });
-      addSystem(output.trim() || "No changes.");
+      if (!stat && !full.trim()) {
+        addSystem("No changes.");
+      } else {
+        const fileCount = stat.split("\n").filter(l => l.includes("|")).length;
+        const header = stat ? `── ${fileCount} file${fileCount !== 1 ? "s" : ""} changed ──\n${stat}\n${"─".repeat(40)}\n` : "";
+        addSystem(header + full.trim());
+      }
       return true;
     }
     if (value === "/undo") {
@@ -1128,7 +1193,11 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
 
   const handleSubmit = async (value: string) => {
     if (!value.trim()) return;
-    const trimmed = value.trim();
+    // Expand [paste #N: M lines] placeholders back to their full content
+    const expanded = value.replace(/\[paste #(\d+): \d+ lines?\]/g, (_, id) => {
+      return pasteRefsRef.current.get(id) ?? _;
+    });
+    const trimmed = expanded.trim();
     setInput("");
     if (trimmed && (inputHistoryRef.current.length === 0 || inputHistoryRef.current[inputHistoryRef.current.length - 1] !== trimmed)) {
       inputHistoryRef.current.push(trimmed);
@@ -1407,13 +1476,23 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     // Regular character — append
     if (inputChar && !key.ctrl) {
       historyIndexRef.current = -1;
-      const newInput = input + inputChar;
+      // Detect paste: large input arrives in one event. Store the content
+      // in pasteRefsRef and insert a [paste #N: M lines] placeholder so
+      // the prompt stays compact. Expanded back at submit time.
       if (inputChar.length >= 200 || inputChar.split("\n").length >= 3) {
         const lineCount = inputChar.split("\n").length;
-        setPasteNotice(`Pasted ${lineCount} line${lineCount > 1 ? "s" : ""}`);
+        const id = String(++pasteCounterRef.current);
+        pasteRefsRef.current.set(id, inputChar);
+        const placeholder = `[paste #${id}: ${lineCount} line${lineCount > 1 ? "s" : ""}]`;
+        const newInput = input + placeholder;
+        setPasteNotice(`Pasted ${lineCount} line${lineCount > 1 ? "s" : ""} — ${placeholder}`);
         if (pasteNoticeTimerRef.current) clearTimeout(pasteNoticeTimerRef.current);
         pasteNoticeTimerRef.current = setTimeout(() => setPasteNotice(null), 2000);
+        setInput(newInput);
+        setSlashCmdIndex(0);
+        return;
       }
+      const newInput = input + inputChar;
       setInput(newInput);
       setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);

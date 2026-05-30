@@ -10,10 +10,61 @@ interface MessageListProps {
   outputStyle?: "default" | "compact" | "verbose";
 }
 
+// Group ≥3 consecutive tool_call entries with the same toolName into one
+// "tool_group" entry. Read 5 files in a row → "● Read × 5" instead of 5
+// separate lines. Tool results stay separate so output is still readable.
+export function groupConsecutiveToolCalls(history: HistoryEntry[]): HistoryEntry[] {
+  const out: HistoryEntry[] = [];
+  let i = 0;
+  while (i < history.length) {
+    const entry = history[i];
+    if (
+      entry.type === "tool_call" &&
+      entry.toolName !== "more" &&
+      entry.toolName &&
+      // Only group "noisy" read-only tools — never edits or bash
+      ["read_file", "grep", "glob", "list_directory", "read_many_files"].includes(entry.toolName)
+    ) {
+      // Look ahead: collect consecutive same-tool entries (allowing tool_result between)
+      const groupName = entry.toolName;
+      const groupNested = entry.nested;
+      const callTexts: string[] = [];
+      let j = i;
+      while (j < history.length) {
+        const e = history[j];
+        if (e.type === "tool_call" && e.toolName === groupName && e.nested === groupNested) {
+          callTexts.push(e.text || "");
+          j++;
+        } else if (e.type === "tool_result" && j > i) {
+          // skip the result that follows a grouped call — keep advancing
+          j++;
+        } else {
+          break;
+        }
+      }
+      if (callTexts.length >= 3) {
+        out.push({
+          type: "tool_call",
+          toolName: groupName,
+          text: `${callTexts.length} calls`,
+          nested: groupNested,
+          fullText: callTexts.join(" | "),
+        });
+        i = j;
+        continue;
+      }
+    }
+    out.push(entry);
+    i++;
+  }
+  return out;
+}
+
 export function MessageList({ history, outputStyle = "default" }: MessageListProps) {
   const theme = useTheme();
+  const displayed = groupConsecutiveToolCalls(history);
   return (
-    <Static items={history}>
+    <Static items={displayed}>
       {(entry, index) => (
         <Box key={index} flexDirection="column" marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
           {entry.type === "banner" && (

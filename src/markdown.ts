@@ -147,28 +147,71 @@ export class MarkdownRenderer {
     if (rows.length === 0) return "";
 
     const colCount = Math.max(...rows.map(r => r.length));
-    const colWidths: number[] = Array(colCount).fill(0);
+    const rawWidths: number[] = Array(colCount).fill(0);
     for (const row of rows) {
       for (let i = 0; i < row.length; i++) {
-        colWidths[i] = Math.max(colWidths[i], stripAnsi(row[i]).length);
+        rawWidths[i] = Math.max(rawWidths[i], stripAnsi(row[i]).length);
       }
     }
+
+    // Terminal-aware: cap total width at terminal cols. If exceeded,
+    // proportionally scale columns; minimum cell width = 6.
+    const termCols = (process.stdout.columns ?? 100) - 2;
+    const overhead = colCount + 1 + colCount * 2; // borders + padding per col
+    const sumRaw = rawWidths.reduce((a, b) => a + b, 0);
+    const colWidths = [...rawWidths];
+    if (sumRaw + overhead > termCols) {
+      const available = Math.max(colCount * 6, termCols - overhead);
+      const scale = available / sumRaw;
+      for (let i = 0; i < colCount; i++) {
+        colWidths[i] = Math.max(6, Math.floor(rawWidths[i] * scale));
+      }
+    }
+
+    const wrapCell = (text: string, width: number): string[] => {
+      const stripped = stripAnsi(text);
+      if (stripped.length <= width) return [text];
+      // Plain text wrap (color codes lost on wrapped lines — acceptable)
+      const out: string[] = [];
+      let remaining = stripped;
+      while (remaining.length > width) {
+        let cut = width;
+        const lastSpace = remaining.lastIndexOf(" ", width);
+        if (lastSpace > width / 2) cut = lastSpace;
+        out.push(remaining.slice(0, cut));
+        remaining = remaining.slice(cut).trimStart();
+      }
+      if (remaining) out.push(remaining);
+      return out;
+    };
 
     const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - stripAnsi(s).length));
     const top = "┌" + colWidths.map(w => "─".repeat(w + 2)).join("┬") + "┐";
     const mid = "├" + colWidths.map(w => "─".repeat(w + 2)).join("┼") + "┤";
     const bot = "└" + colWidths.map(w => "─".repeat(w + 2)).join("┴") + "┘";
-    const row2str = (row: string[], bold = false) =>
-      "│" + row.map((cell, i) => " " + (bold ? chalk.bold(pad(cell, colWidths[i])) : pad(cell, colWidths[i])) + " ").join("│") + "│";
+
+    const renderRow = (row: string[], bold = false): string[] => {
+      const wrapped = row.map((cell, i) => wrapCell(cell, colWidths[i] ?? 0));
+      const lineCount = Math.max(...wrapped.map(w => w.length));
+      const lines: string[] = [];
+      for (let li = 0; li < lineCount; li++) {
+        const cells = wrapped.map((wlines, ci) => {
+          const cell = wlines[li] ?? "";
+          return " " + (bold ? chalk.bold(pad(cell, colWidths[ci])) : pad(cell, colWidths[ci])) + " ";
+        });
+        lines.push("│" + cells.join("│") + "│");
+      }
+      return lines;
+    };
 
     const lines: string[] = [];
     lines.push(chalk.gray(top));
     rows.forEach((row, i) => {
       if (i === 0) {
-        lines.push(row2str(row, true));
+        lines.push(...renderRow(row, true));
         lines.push(chalk.gray(mid));
       } else {
-        lines.push(row2str(row, false));
+        lines.push(...renderRow(row, false));
       }
     });
     lines.push(chalk.gray(bot));
