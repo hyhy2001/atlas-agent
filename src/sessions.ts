@@ -2,6 +2,7 @@ import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { MessageParam } from "./provider/types.js";
 import { paths } from "./paths.js";
+import { sequential } from "./utils/sequential.js";
 
 export interface Session {
   id: string;
@@ -35,12 +36,12 @@ export function generateSessionId(): string {
   return `${date}-${time}-${rand}`;
 }
 
-export async function saveSession(session: Session): Promise<void> {
+export const saveSession = sequential(async (session: Session): Promise<void> => {
   const dir = getSessionsDir();
   await mkdir(dir, { recursive: true });
   const filePath = join(dir, `${session.id}.json`);
   await writeFile(filePath, JSON.stringify(session, null, 2), "utf-8");
-}
+});
 
 export async function loadSession(id: string): Promise<Session | null> {
   const filePath = join(getSessionsDir(), `${id}.json`);

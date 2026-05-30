@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { sequential } from "../utils/sequential.js";
 
 export interface Task {
   id: string;
@@ -30,8 +31,11 @@ export class TaskStore {
   private tasks = new Map<string, Task>();
   private nextId = 1;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly save: () => Promise<void>;
 
-  constructor(private storePath: string) {}
+  constructor(private storePath: string) {
+    this.save = sequential(this._save.bind(this));
+  }
 
   async load(): Promise<void> {
     try {
@@ -52,7 +56,7 @@ export class TaskStore {
     this.saveTimer = setTimeout(() => { this.save().catch(() => {}); }, 300);
   }
 
-  async save(): Promise<void> {
+  private async _save(): Promise<void> {
     await fs.mkdir(path.dirname(this.storePath), { recursive: true });
     const data = { nextId: this.nextId, tasks: Array.from(this.tasks.values()) };
     await fs.writeFile(this.storePath, JSON.stringify(data, null, 2), "utf8");

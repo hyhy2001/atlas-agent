@@ -127,22 +127,68 @@ export const delegateParallelTool: ToolDefinition = {
       return { toolUseId: "", content: "Error: no tasks provided", isError: true };
     }
 
-    const results = await Promise.all(
-      tasks.map(async (t, i) => {
-        try {
-          const result = await executeSingleDelegate(t, ctx);
-          return `## Task ${i + 1}: ${t.agent} — ${t.task.slice(0, 60)}\n\n${result}`;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return `## Task ${i + 1}: ${t.agent} — ERROR\n\n${msg}`;
+    // Partition by file overlap: tasks that touch the same file must run
+    // sequentially (avoid concurrent edits to the same file). Tasks with
+    // disjoint file sets run in parallel. Tasks with no `files` declared
+    // are assumed to potentially conflict — group them sequentially too.
+    const groups = partitionTasksByFiles(tasks);
+
+    // Run each group's tasks sequentially; run groups in parallel.
+    const groupResults = await Promise.all(
+      groups.map(async (group) => {
+        const out: Array<{ index: number; text: string }> = [];
+        for (const { task, index } of group) {
+          try {
+            const result = await executeSingleDelegate(task, ctx);
+            out.push({ index, text: `## Task ${index + 1}: ${task.agent} — ${task.task.slice(0, 60)}\n\n${result}` });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            out.push({ index, text: `## Task ${index + 1}: ${task.agent} — ERROR\n\n${msg}` });
+          }
         }
+        return out;
       })
     );
 
+    // Flatten and re-sort by original index for stable output order.
+    const flat = groupResults.flat().sort((a, b) => a.index - b.index);
     return {
       toolUseId: "",
-      content: results.join("\n\n---\n\n"),
+      content: flat.map(r => r.text).join("\n\n---\n\n"),
       isError: false,
     };
   },
 };
+
+// Group tasks so each group's tasks have NO file overlap with each other
+// task in OTHER groups, but tasks within a group may overlap (run serial).
+// Tasks without declared files are placed in their own serial group.
+export function partitionTasksByFiles(tasks: ParallelTask[]): Array<Array<{ task: ParallelTask; index: number }>> {
+  const groups: Array<{ files: Set<string>; items: Array<{ task: ParallelTask; index: number }> }> = [];
+
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    const taskFiles = new Set(task.files ?? []);
+
+    if (taskFiles.size === 0) {
+      // No declared files — conservative: own serial group
+      groups.push({ files: new Set(), items: [{ task, index: i }] });
+      continue;
+    }
+
+    // Find a group whose files overlap → join (run serially within that group)
+    const overlap = groups.find(g => {
+      for (const f of taskFiles) if (g.files.has(f)) return true;
+      return false;
+    });
+
+    if (overlap) {
+      overlap.items.push({ task, index: i });
+      for (const f of taskFiles) overlap.files.add(f);
+    } else {
+      groups.push({ files: taskFiles, items: [{ task, index: i }] });
+    }
+  }
+
+  return groups.map(g => g.items);
+}
