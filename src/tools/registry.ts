@@ -58,7 +58,9 @@ export class ToolRegistry {
       "team_create",
     ]);
     for (const tool of this.getAll()) {
-      if (leaderTools.has(tool.name)) {
+      // MCP tools use "server__tool" naming convention — always expose to leader
+      // so it can use codebase-memory, figma, and other MCP servers directly.
+      if (leaderTools.has(tool.name) || tool.name.includes("__")) {
         filtered.register(tool);
       }
     }
