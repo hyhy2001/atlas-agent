@@ -9,7 +9,7 @@ import { PermissionSession } from "./permissions/session.js";
 import { startRepl } from "./repl.js";
 import { startTui } from "./tui/render.js";
 import { runHeadless } from "./headless.js";
-import { DEFAULT_SYSTEM_PROMPT } from "./agent/system_prompt.js";
+import { DEFAULT_SYSTEM_PROMPT, buildLeaderPrompt } from "./agent/system_prompt.js";
 import { listSessions, loadSession } from "./sessions.js";
 import { loadProjectContext, findProjectContextPath } from "./agent/context_loader.js";
 import { loadCommands } from "./commands.js";
@@ -111,7 +111,8 @@ async function main() {
   const config = loadConfig(args.model ? { model: args.model } : undefined);
 
   // Resolve system prompt: default → config → env → --system-prompt → --system-prompt-file
-  let systemPrompt: string = DEFAULT_SYSTEM_PROMPT;
+  // Built per-session with env (cwd, git, model) injected after the dynamic boundary.
+  let systemPrompt: string = buildLeaderPrompt({ model: config.model });
   if (config.systemPrompt) {
     systemPrompt = config.systemPrompt;
   }

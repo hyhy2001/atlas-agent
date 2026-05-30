@@ -5,49 +5,35 @@ import { ToolExecutor } from "../tools/executor.js";
 import type { ExecutionContext } from "../tools/types.js";
 import { runAgentLoop } from "./loop.js";
 import { PermissionSession } from "../permissions/session.js";
+import {
+  getRoleSection,
+  getToneSection,
+  getActionsCareSection,
+  getNumericLengthAnchorsSection,
+  getFaithfulReportingSection,
+  getEnvSection,
+  DYNAMIC_BOUNDARY,
+} from "./prompt_sections.js";
 
 export type AgentProfile = "atlas-swift" | "atlas-forge" | "atlas-deep";
 
-export const ATLAS_MECH_PROMPT = `You are atlas-swift, a mechanical code executor. You ONLY apply exact edits provided to you.
+function buildExecutorPrompt(profile: AgentProfile, model?: string): string {
+  return [
+    getRoleSection(profile),
+    getToneSection(),
+    getActionsCareSection(),
+    getNumericLengthAnchorsSection(),
+    getFaithfulReportingSection(),
+    DYNAMIC_BOUNDARY,
+    getEnvSection({ model }),
+  ].filter(Boolean).join("\n\n");
+}
 
-Rules:
-- Apply the exact old_string → new_string replacements specified
-- Run build/test commands if specified
-- Report immediately if old_string doesn't match or build fails
-- Do NOT discover code, do NOT expand scope, do NOT reason about alternatives
-- If anything is unclear or fails, report and STOP — do not retry`;
-
-export const ATLAS_CODER_PROMPT = `You are atlas-forge, a code implementation agent. You implement features, fix bugs, refactor code, and write tests.
-
-Rules:
-- Follow the plan provided by the leader exactly
-- For code discovery, PREFER MCP tools when available:
-  - codebase-memory__search_graph: find functions/classes/routes by name or query
-  - codebase-memory__get_code_snippet: read source of a specific symbol
-  - codebase-memory__trace_path: find callers/callees, data flow
-  - codebase-memory__search_code: text search with graph ranking
-  - Fall back to read_file, grep, glob only when MCP tools are unavailable
-- Use edit_file and write_file to make changes
-- Run build and test commands with bash after changes
-- Report: files changed, diff summary, build/test results, blockers
-- Do NOT decide architecture or expand scope beyond the plan
-- Do NOT skip build/test verification
-- STOP when the task is done. Once tests pass and the requested change works, report and stop. Do NOT keep editing to "improve" the result — small refactors that weren't asked for are regressions.`;
-
-export const ATLAS_RESCUE_PROMPT = `You are atlas-deep, a deep investigation agent. You are called when atlas-forge has failed twice on the same task.
-
-Rules:
-- Start fresh — do NOT repeat the same approach that failed
-- Investigate root cause thoroughly before attempting a fix
-- PREFER MCP tools for deep investigation:
-  - codebase-memory__search_graph: find symbols, understand structure
-  - codebase-memory__trace_path: trace call chains and data flow
-  - codebase-memory__query_graph: complex multi-hop Cypher queries
-  - codebase-memory__get_architecture: understand project structure
-  - Fall back to read_file, grep, glob when MCP unavailable
-- Consider alternative approaches the previous attempts missed
-- Report your findings and proposed approach before making changes
-- Be thorough but surgical — fix the actual problem, not symptoms`;
+// Backward-compatible exports — prefer buildExecutorPrompt() for fresh
+// per-session env injection.
+export const ATLAS_MECH_PROMPT = buildExecutorPrompt("atlas-swift");
+export const ATLAS_CODER_PROMPT = buildExecutorPrompt("atlas-forge");
+export const ATLAS_RESCUE_PROMPT = buildExecutorPrompt("atlas-deep");
 
 export interface RunSubagentOptions {
   profile: AgentProfile;
@@ -71,17 +57,17 @@ function selectProfile(profile: AgentProfile, provider: OpenAIProvider, fastMode
   switch (profile) {
     case "atlas-swift":
       return {
-        systemPrompt: ATLAS_MECH_PROMPT,
+        systemPrompt: buildExecutorPrompt("atlas-swift", fastModel ?? provider.getModel()),
         subProvider: fastModel ? provider.withModel(fastModel) : provider,
       };
     case "atlas-forge":
       return {
-        systemPrompt: ATLAS_CODER_PROMPT,
+        systemPrompt: buildExecutorPrompt("atlas-forge", fastModel ?? provider.getModel()),
         subProvider: fastModel ? provider.withModel(fastModel) : provider,
       };
     case "atlas-deep":
       return {
-        systemPrompt: ATLAS_RESCUE_PROMPT,
+        systemPrompt: buildExecutorPrompt("atlas-deep", reasoningModel ?? provider.getModel()),
         subProvider: reasoningModel ? provider.withModel(reasoningModel) : provider,
       };
   }
