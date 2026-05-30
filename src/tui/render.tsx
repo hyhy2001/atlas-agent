@@ -85,6 +85,7 @@ export async function startTui(params: {
   fastModel?: string;
   startInPlanMode?: boolean;
   skills?: Skill[];
+  theme?: string;
   mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }): Promise<void> {
   process.env.__ATLAS_INK_MODE = "1";
@@ -107,6 +108,7 @@ export async function startTui(params: {
       fastModel={params.fastModel}
       startInPlanMode={params.startInPlanMode}
       skills={params.skills}
+      theme={params.theme}
     />
   );
   await waitUntilExit();

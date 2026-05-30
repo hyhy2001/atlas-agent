@@ -14,7 +14,7 @@ export function DiffBlock({ text, nested }: DiffBlockProps) {
 
   const { header, lines } = parseDiffOutput(text);
   const indent = nested ? 4 : 2;
-  const maxLines = 15;
+  const maxLines = 40;
   const visibleLines = lines.slice(0, maxLines);
   const hiddenCount = lines.length - visibleLines.length;
   return (
@@ -63,7 +63,7 @@ export function DiffBlock({ text, nested }: DiffBlockProps) {
       })}
       {hiddenCount > 0 && (
         <Box paddingLeft={3}>
-          <Text color={theme.muted} dimColor>{"  … +" + hiddenCount + " more lines"}</Text>
+          <Text color={theme.muted} dimColor>{"  … +" + hiddenCount + " more lines (use /diff for full diff)"}</Text>
         </Box>
       )}
     </Box>

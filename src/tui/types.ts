@@ -1,5 +1,5 @@
 export interface HistoryEntry {
-  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full" | "subagent_done";
+  type: "banner" | "user" | "assistant" | "system" | "tool_call" | "tool_result" | "tool_result_full" | "subagent_done" | "compact_boundary";
   text: string;
   fullText?: string;
   toolName?: string;

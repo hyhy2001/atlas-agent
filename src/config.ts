@@ -17,6 +17,7 @@ const ConfigSchema = z.object({
   baseURL: z.string().optional(),
   authToken: z.string().optional(),
   systemPrompt: z.string().optional(),
+  theme: z.enum(["dark", "light", "monokai", "solarized"]).default("dark"),
   trustedDirs: z.array(z.string()).default([]),
   mcpServers: z.array(McpServerSchema).default([
     { name: "codebase-memory", command: "./.atlas/bin/codebase-memory-mcp", args: [], autoApprove: true },

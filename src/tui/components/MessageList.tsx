@@ -81,6 +81,11 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
               <Text color={theme.muted} dimColor>{"  ⎿  " + entry.text}</Text>
             </Box>
           )}
+          {entry.type === "compact_boundary" && (
+            <Box>
+              <Text color={theme.muted} dimColor>{"─── compacted ─── " + entry.text + " ───"}</Text>
+            </Box>
+          )}
           {entry.type === "system" && (
             <Text color={theme.primary} dimColor>{entry.text}</Text>
           )}

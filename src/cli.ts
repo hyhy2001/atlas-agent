@@ -326,6 +326,7 @@ async function main() {
           totalToolCount: toolRegistry.getAll().length,
           mcpStatus,
           skills,
+          theme: config.theme,
         });
       } else {
         await startRepl({

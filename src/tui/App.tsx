@@ -47,6 +47,7 @@ interface AppProps {
   startInPlanMode?: boolean;
   bannerText?: string;
   skills?: Skill[];
+  theme?: string;
   mcpStatus?: Array<{ name: string; command: string; status: "connected" | "failed"; toolCount: number; error?: string }>;
 }
 
@@ -80,6 +81,26 @@ const PERM_MODE_LABELS: Record<PermMode, string> = {
   plan: "plan only",
 };
 
+export function formatApiError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/429|rate.?limit/i.test(msg)) {
+    return `⏳ Rate limit hit. The model is throttling — wait a moment then retry.\n   ${msg.slice(0, 200)}`;
+  }
+  if (/529|overloaded/i.test(msg)) {
+    return `⚠ API overloaded. The provider is temporarily unavailable — retry in ~30s.\n   ${msg.slice(0, 200)}`;
+  }
+  if (/ECONNRESET|EPIPE|socket hang up/i.test(msg)) {
+    return `⚠ Connection dropped. Atlas auto-recreates the client — retry should work.\n   ${msg.slice(0, 200)}`;
+  }
+  if (/401|unauthorized|forbidden/i.test(msg)) {
+    return `🔒 Authentication failed. Check ATLAS_AUTH_TOKEN.\n   ${msg.slice(0, 200)}`;
+  }
+  if (/context.*length|max.*tokens.*exceed|prompt is too long/i.test(msg)) {
+    return `📏 Context too long. Try /compact to summarize and free up space.\n   ${msg.slice(0, 200)}`;
+  }
+  return `Error: ${msg}`;
+}
+
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
@@ -93,7 +114,7 @@ export const App: React.FC<AppProps> = (props) => {
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [outputStyle, setOutputStyle] = useState<"default" | "compact" | "verbose">("default");
-  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const [themeName, setThemeName] = useState<ThemeName>((props.theme as ThemeName) ?? "dark");
   const theme = THEMES[themeName];
   const [spinFrame, setSpinFrame] = useState(0);
   const SPIN_FRAMES = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
@@ -527,7 +548,7 @@ export const App: React.FC<AppProps> = (props) => {
       }
       saveSession(buildSession()).catch(() => {});
     } catch (err) {
-      addSystem(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      addSystem(formatApiError(err));
     } finally {
       setIsRunning(false);
       setCurrentToolName("");
@@ -636,6 +657,7 @@ export const App: React.FC<AppProps> = (props) => {
         });
         messagesRef.current = result.messages;
         addSystem(`Compacted ${before} → ${result.messages.length} messages.\n\n## Summary\n\n${result.summary}`);
+        setHistory(h => [...h, { type: "compact_boundary", text: new Date().toLocaleTimeString() }]);
       } catch (err) {
         addSystem(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -677,6 +699,17 @@ export const App: React.FC<AppProps> = (props) => {
       if (chosen === "dark" || chosen === "light" || chosen === "monokai" || chosen === "solarized") {
         setThemeName(chosen);
         addSystem(`Theme: ${chosen}`);
+        try {
+          const { paths } = await import("../paths.js");
+          const configPath = paths.config();
+          await fs.mkdir(path.dirname(configPath), { recursive: true });
+          let cfg: Record<string, unknown> = {};
+          try {
+            cfg = JSON.parse(await fs.readFile(configPath, "utf-8")) as Record<string, unknown>;
+          } catch {}
+          cfg.theme = chosen;
+          await fs.writeFile(configPath, JSON.stringify(cfg, null, 2), "utf-8");
+        } catch {}
       }
       return true;
     }
@@ -1410,6 +1443,15 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             <Text color="yellow" dimColor>{"Context window >80% full — consider /compact to free space"}</Text>
           </Box>
         )}
+        {!liveTokens || liveTokens <= 80000 ? (() => {
+          const estimatedCost = (tokens.input / 1_000_000) * 1.5 + (tokens.output / 1_000_000) * 15.0;
+          return estimatedCost > 1.0 ? (
+            <Box paddingX={1}>
+              <Text color={theme.warning}>{"💰 "}</Text>
+              <Text color={theme.warning} dimColor>{`Estimated session cost: $${estimatedCost.toFixed(2)} — use /cost for breakdown`}</Text>
+            </Box>
+          ) : null;
+        })() : null}
         <QuestionOverlay overlay={questionOverlay} width={overlayWidth} />
         {liveTail && (
           <Box>
