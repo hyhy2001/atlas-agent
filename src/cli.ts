@@ -108,11 +108,6 @@ async function main() {
 
   const args = parseArgs(process.argv);
 
-  // First-run bootstrap: if no .atlas/ exists anywhere, ask user where to
-  // create it (binary dir = portable, home dir = global). Skip in dev mode.
-  const { maybeBootstrap } = await import("./bootstrap.js");
-  await maybeBootstrap();
-
   const config = loadConfig(args.model ? { model: args.model } : undefined);
 
   // Resolve system prompt: default → config → env → --system-prompt → --system-prompt-file
