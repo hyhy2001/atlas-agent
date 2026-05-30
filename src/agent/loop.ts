@@ -27,6 +27,12 @@ export async function runAgentLoop(params: {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
+  // Count system prompt + tool schemas once per loop entry — they don't
+  // change across turns within a single user request.
+  const systemTokens = estimateTokens(systemPrompt ?? "");
+  const toolsJson = JSON.stringify(getCachedTools(toolRegistry.toOpenAITools()));
+  const toolSchemaTokens = estimateTokens(toolsJson);
+
   while (true) {
     if (abortSignal.aborted) return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
 
@@ -84,13 +90,11 @@ export async function runAgentLoop(params: {
       else process.stdout.write(flushed);
     }
 
-    // Estimate input tokens: messages + system prompt + tool schemas.
-    // Previously only messages were counted, causing the TUI to show ~13↑
-    // even with a 2000-token system prompt.
-    const toolsJson = JSON.stringify(tools);
-    totalInputTokens += estimateTokens(JSON.stringify(messages))
-      + estimateTokens(systemPrompt ?? "")
-      + estimateTokens(toolsJson);
+    // Input for THIS request = system prompt + tool schemas (constant per
+    // loop entry) + full message history sent this turn. This matches what
+    // the API actually receives as prompt_tokens each round-trip.
+    const currentMessagesTokens = estimateTokens(JSON.stringify(messages));
+    totalInputTokens += systemTokens + toolSchemaTokens + currentMessagesTokens;
     totalOutputTokens += estimateTokens(assistantContent + JSON.stringify(toolCalls));
 
     const assistantMsg: MessageParam = {
