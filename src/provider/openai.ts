@@ -112,10 +112,25 @@ export class OpenAIProvider {
       messages: msgs,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
+      stream_options: { include_usage: true },
       max_tokens: 8192,
     });
 
     for await (const chunk of stream) {
+      // Usage chunk arrives on the final chunk (choices=[]) when include_usage=true
+      if (chunk.usage) {
+        const u = chunk.usage as {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          prompt_tokens_details?: { cached_tokens?: number };
+        };
+        yield {
+          type: "usage",
+          inputTokens: u.prompt_tokens ?? 0,
+          outputTokens: u.completion_tokens ?? 0,
+          cachedTokens: u.prompt_tokens_details?.cached_tokens ?? 0,
+        };
+      }
       const choice = chunk.choices[0];
       if (!choice) continue;
       const delta = choice.delta;

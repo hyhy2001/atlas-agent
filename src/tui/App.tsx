@@ -134,7 +134,7 @@ export const App: React.FC<AppProps> = (props) => {
 
   const fullWidth = termCols - 2;
   const overlayWidth = Math.max(40, termCols - 4);
-  const [tokens, setTokens] = useState({ input: 0, output: 0 });
+  const [tokens, setTokens] = useState({ input: 0, output: 0, cached: 0 });
   const [liveTokens, setLiveTokens] = useState(0);
   const [planActive, setPlanActive] = useState(Boolean(props.startInPlanMode));
   const [permMode, setPermMode] = useState<PermMode>("ask");
@@ -550,7 +550,7 @@ export const App: React.FC<AppProps> = (props) => {
           }
         },
       });
-      setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens }));
+      setTokens(t => ({ input: t.input + result.inputTokens, output: t.output + result.outputTokens, cached: t.cached + (result.cachedTokens ?? 0) }));
       // Flush any batched complete lines first, then commit remaining tail
       const pending = pendingCommitRef.current;
       pendingCommitRef.current = "";
@@ -804,11 +804,15 @@ export const App: React.FC<AppProps> = (props) => {
       const mainModel = props.provider.getModel();
       const fastModel = fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? mainModel;
       const reasoningModel = reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? mainModel;
+      const cacheHitPct = tokens.input > 0 ? ((tokens.cached / tokens.input) * 100).toFixed(1) : "0.0";
       const lines = [
         `Token usage this session:`,
         `  Input:     ${formatTokenCount(tokens.input)} tokens  (~$${inCost.toFixed(4)})`,
         `  Output:    ${formatTokenCount(tokens.output)} tokens  (~$${outCost.toFixed(4)})`,
         `  Total:     ${formatTokenCount(total)} tokens  (~$${(inCost + outCost).toFixed(4)})`,
+        tokens.cached > 0
+          ? `  Cached:    ${formatTokenCount(tokens.cached)} tokens  (${cacheHitPct}% cache hit)`
+          : `  Cached:    0 tokens  (no cache hits yet — proxy may not support prompt caching)`,
         ``,
         `Model tiers:`,
         `  leader:    ${mainModel}`,

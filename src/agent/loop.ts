@@ -10,6 +10,7 @@ import { getCachedTools } from "../utils/toolSchemaCache.js";
 export interface LoopResult {
   inputTokens: number;
   outputTokens: number;
+  cachedTokens: number;
 }
 
 export async function runAgentLoop(params: {
@@ -26,6 +27,7 @@ export async function runAgentLoop(params: {
   const { provider, messages, toolRegistry, executor, systemPrompt, abortSignal, onText, onTokens, onReasoning } = params;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalCachedTokens = 0;
 
   // Count system prompt + tool schemas once per loop entry — they don't
   // change across turns within a single user request.
@@ -34,13 +36,17 @@ export async function runAgentLoop(params: {
   const toolSchemaTokens = estimateTokens(toolsJson);
 
   while (true) {
-    if (abortSignal.aborted) return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+    if (abortSignal.aborted) return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cachedTokens: totalCachedTokens };
 
     const tools = getCachedTools(toolRegistry.toOpenAITools());
     const toolCalls: ToolCall[] = [];
     let currentToolCall: { id: string; name: string; args: string } | null = null;
     let assistantContent = "";
     const renderer = new MarkdownRenderer();
+    // Per-turn real usage from API (preferred over estimate when available)
+    let turnInput: number | null = null;
+    let turnOutput: number | null = null;
+    let turnCached: number | null = null;
 
     for await (const delta of provider.stream(messages, tools, systemPrompt)) {
       if (abortSignal.aborted) break;
@@ -53,6 +59,13 @@ export async function runAgentLoop(params: {
         }
         assistantContent += delta.text;
         if (onTokens) onTokens(Math.ceil(delta.text.length / 4));
+      } else if (delta.type === "usage") {
+        // Real token counts from the API — prefer over estimate.
+        turnInput = delta.inputTokens ?? null;
+        turnOutput = delta.outputTokens ?? null;
+        turnCached = delta.cachedTokens ?? null;
+        // Forward live token count to TUI so the counter updates accurately.
+        if (onTokens && delta.inputTokens) onTokens(0);
       } else if (delta.type === "reasoning" && delta.text) {
         if (onReasoning) onReasoning(delta.text);
       } else if (delta.type === "tool_call_start") {
@@ -90,12 +103,17 @@ export async function runAgentLoop(params: {
       else process.stdout.write(flushed);
     }
 
-    // Input for THIS request = system prompt + tool schemas (constant per
-    // loop entry) + full message history sent this turn. This matches what
-    // the API actually receives as prompt_tokens each round-trip.
-    const currentMessagesTokens = estimateTokens(JSON.stringify(messages));
-    totalInputTokens += systemTokens + toolSchemaTokens + currentMessagesTokens;
-    totalOutputTokens += estimateTokens(assistantContent + JSON.stringify(toolCalls));
+    // Prefer real usage from the API; fall back to a byte/4 estimate only
+    // when the provider didn't return usage (e.g. proxy strips it).
+    if (turnInput !== null) {
+      totalInputTokens += turnInput;
+      totalOutputTokens += turnOutput ?? 0;
+      totalCachedTokens += turnCached ?? 0;
+    } else {
+      const currentMessagesTokens = estimateTokens(JSON.stringify(messages));
+      totalInputTokens += systemTokens + toolSchemaTokens + currentMessagesTokens;
+      totalOutputTokens += estimateTokens(assistantContent + JSON.stringify(toolCalls));
+    }
 
     const assistantMsg: MessageParam = {
       role: "assistant",
@@ -130,5 +148,5 @@ export async function runAgentLoop(params: {
     }
   }
 
-  return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+  return { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, cachedTokens: totalCachedTokens };
 }
