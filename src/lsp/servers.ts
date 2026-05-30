@@ -157,12 +157,18 @@ export async function resolveServerCommand(cfg: ServerConfig): Promise<string | 
   // github-release binaries are placed directly under lspDir
   const ghLocal = path.join(dir, cfg.command);
   if (existsSync(ghLocal)) return ghLocal;
-  try {
-    const resolved = await which(cfg.command);
-    return resolved;
-  } catch {
-    return null;
+  // Only fall back to a globally-installed binary for servers we cannot
+  // auto-install into the atlas dir (clangd, verible). Auto-installable
+  // servers (npm/pip/github-release) must live in the atlas install dir —
+  // never resolve them from a global location.
+  if (!cfg.installType) {
+    try {
+      return await which(cfg.command);
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 interface GithubReleaseInfo {
