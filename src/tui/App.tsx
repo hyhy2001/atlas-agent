@@ -1510,8 +1510,12 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         setSlashCmdIndex(0);
         return;
       }
+      // Use a functional updater so this runs AFTER any in-flight setInput
+      // (e.g. a backspace event from the same tick when an IME splits a
+      // chunk into DEL + composed char). Reading `input` from closure here
+      // would clobber the backspace and leave "Baây" instead of "Bây".
       const newInput = input + inputChar;
-      setInput(newInput);
+      setInput(s => s + inputChar);
       setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
       if (atMatch) {
