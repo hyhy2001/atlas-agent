@@ -147,7 +147,9 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             <Box paddingLeft={entry.nested ? 2 : 0}>
               <Text color={entry.isError ? theme.error : theme.success}>{"● "}</Text>
               <Text bold>{formatToolName(entry.toolName ?? "tool")}</Text>
-              {entry.text && <Text color={theme.muted} dimColor>{"(" + entry.text + ")"}</Text>}
+              {entry.text && !["memory_save","memory_append","memory_read","memory_delete","todo_read","todo_write","task_create","task_get","task_list","task_update","task_delete"].includes(entry.toolName ?? "") && (
+                <Text color={theme.muted} dimColor>{"(" + entry.text + ")"}</Text>
+              )}
             </Box>
           )}
           {entry.type === "tool_result" && isDiffOutput(entry.text) && (
