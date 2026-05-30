@@ -16,6 +16,7 @@ import {
   getVerificationSection,
   getUsingToolsSection,
   getSystemHygieneSection,
+  getResultClearingSection,
   getEnvSection,
   DYNAMIC_BOUNDARY,
 } from "./prompt_sections.js";
@@ -45,6 +46,7 @@ function buildExecutorPrompt(profile: AgentProfile, model?: string): string {
     getToneSection(),
     getActionsCareSection(),
     getSystemHygieneSection(),
+    getResultClearingSection(),
     getNumericLengthAnchorsSection(),
     getFaithfulReportingSection(),
     DYNAMIC_BOUNDARY,

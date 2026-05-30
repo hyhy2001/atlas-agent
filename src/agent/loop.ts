@@ -4,7 +4,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import { MarkdownRenderer } from "../markdown.js";
 import { estimateTokens } from "../utils/tokenEstimation.js";
-import { offloadIfLarge } from "../utils/toolResultStorage.js";
+import { offloadIfLarge, applyToolResultBudget } from "../utils/toolResultStorage.js";
 import { getCachedTools } from "../utils/toolSchemaCache.js";
 
 export interface LoopResult {
@@ -114,12 +114,18 @@ export async function runAgentLoop(params: {
 
     const results = await executor.execute(toolBlocks);
 
-    for (const result of results) {
-      const content = await offloadIfLarge(result.toolUseId, result.content);
+    // 1. Offload oversized results to disk (middle-cut preview).
+    const offloaded = await Promise.all(
+      results.map(r => offloadIfLarge(r.toolUseId, r.content))
+    );
+    // 2. Apply per-message aggregate cap — clear oldest results if the
+    //    combined size still blows the budget after offload.
+    const budgeted = applyToolResultBudget(offloaded);
+    for (let i = 0; i < results.length; i++) {
       messages.push({
         role: "tool",
-        content,
-        tool_call_id: result.toolUseId,
+        content: budgeted[i],
+        tool_call_id: results[i].toolUseId,
       });
     }
   }

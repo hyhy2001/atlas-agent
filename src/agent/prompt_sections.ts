@@ -212,6 +212,12 @@ export function getSkillInvocationSection(): string {
 When the user types \`/<skill-name>\`, invoke it. Only use skills that are actually loaded — never guess or invent a skill name. Skills you don't recognize are not available.`;
 }
 
+export function getResultClearingSection(): string {
+  return `## Context Management
+
+Old tool results may be cleared or truncated from context to save space (large outputs are offloaded to disk; the most recent results are kept). If a tool result contains information you'll need later — a file path, an error message, a value — write it down in your own response now, while you can still see it. Don't rely on re-reading an old tool result; it may be gone.`;
+}
+
 export function getMcpInstructionsSection(
   mcpStatus?: Array<{ name: string; status: string; toolCount: number }>
 ): string {

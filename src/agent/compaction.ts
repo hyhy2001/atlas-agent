@@ -4,11 +4,15 @@ import type { OpenAIProvider } from "../provider/openai.js";
 export interface CompactionConfig {
   maxTokenEstimate: number;
   keepRecentMessages: number;
+  contextWindow?: number;      // model context window size
+  outputReserve?: number;      // tokens reserved for the summary/response
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   maxTokenEstimate: 80000,
   keepRecentMessages: 6,
+  contextWindow: 200000,
+  outputReserve: 20000,
 };
 
 const SUMMARIZATION_PROMPT = `You are summarizing a coding assistant conversation to preserve context across a context window reset.
@@ -50,7 +54,15 @@ export function estimateTokens(messages: MessageParam[]): number {
 }
 
 export function shouldCompact(messages: MessageParam[], config: CompactionConfig): boolean {
-  return estimateTokens(messages) > config.maxTokenEstimate;
+  // Effective threshold = context window − output reserve, capped by the
+  // explicit maxTokenEstimate (whichever is lower). This way the agent loop
+  // compacts BEFORE the API rejects with prompt-too-long, leaving headroom
+  // for the response. Mirrors cc-ref autoCompact.ts:33.
+  const reserveBased = config.contextWindow && config.outputReserve
+    ? config.contextWindow - config.outputReserve
+    : Infinity;
+  const threshold = Math.min(config.maxTokenEstimate, reserveBased);
+  return estimateTokens(messages) > threshold;
 }
 
 export async function compactMessages(params: {

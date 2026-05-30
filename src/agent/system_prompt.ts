@@ -11,6 +11,7 @@ import {
   getSystemHygieneSection,
   getCommunicationSection,
   getSkillInvocationSection,
+  getResultClearingSection,
   getEnvSection,
   DYNAMIC_BOUNDARY,
 } from "./prompt_sections.js";
@@ -31,6 +32,7 @@ export function buildLeaderPrompt(opts: BuildLeaderOpts = {}): string {
     getActionsCareSection(),
     getCyberRiskSection(),
     getSystemHygieneSection(),
+    getResultClearingSection(),
     getNumericLengthAnchorsSection(),
     getSkillInvocationSection(),
     getMcpInstructionsSection(opts.mcpStatus),

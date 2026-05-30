@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { bytesPerTokenForFile, estimateTokens } from '../src/utils/tokenEstimation.js';
 import { getCachedTools, clearToolSchemaCache } from '../src/utils/toolSchemaCache.js';
-import { offloadIfLarge, cleanupOldToolResults } from '../src/utils/toolResultStorage.js';
+import { offloadIfLarge, cleanupOldToolResults, truncateMiddle, applyToolResultBudget } from '../src/utils/toolResultStorage.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -103,5 +103,49 @@ describe('cleanupOldToolResults', () => {
     const n = await cleanupOldToolResults(99999);
     expect(typeof n).toBe('number');
     expect(n).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('truncateMiddle', () => {
+  it('returns content unchanged when within budget', () => {
+    expect(truncateMiddle('short', 1000)).toBe('short');
+  });
+
+  it('keeps head and tail, drops middle', () => {
+    const big = 'A'.repeat(1000) + 'M'.repeat(2000) + 'Z'.repeat(1000);
+    const out = truncateMiddle(big, 600);
+    expect(out).toContain('AAA');
+    expect(out).toContain('ZZZ');
+    expect(out.includes('M'.repeat(1000))).toBe(false);
+    expect(out).toMatch(/middle truncated/);
+  });
+
+  it('reports total line count', () => {
+    const big = Array(500).fill('line').join('\n');
+    const out = truncateMiddle(big, 100);
+    expect(out).toMatch(/500 lines/);
+  });
+});
+
+describe('applyToolResultBudget', () => {
+  it('returns results unchanged when total under cap', () => {
+    const results = ['a', 'b', 'c'];
+    expect(applyToolResultBudget(results)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('clears oldest results, keeps newest', () => {
+    const big = 'x'.repeat(30_000);
+    const results = [big, big, big]; // 90k chars > 50k cap
+    const out = applyToolResultBudget(results);
+    expect(out[2]).toBe(big);                  // newest preserved
+    expect(out[0]).toContain('cleared');       // oldest cleared
+  });
+
+  it('preserves order of results', () => {
+    const big = 'x'.repeat(30_000);
+    const results = ['first', big, 'last'];
+    const out = applyToolResultBudget(results);
+    expect(out).toHaveLength(3);
+    expect(out[2]).toBe('last');
   });
 });
