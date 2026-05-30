@@ -43,7 +43,7 @@ function getToolSummary(name: string, input: unknown): string {
 
 export class ToolExecutor {
   private registry: ToolRegistry;
-  private ctx: ExecutionContext;
+  ctx: ExecutionContext;
   private hooks: HooksConfig;
 
   constructor(registry: ToolRegistry, ctx: ExecutionContext, hooks?: HooksConfig) {
@@ -177,7 +177,7 @@ export class ToolExecutor {
       }
 
       // Check trusted directories to skip permission prompt
-      const trustedDirs = (this.ctx as any)._trustedDirs ?? [];
+      const trustedDirs = this.ctx.trustedDirs ?? [];
       const toolPath = (block.input as any)?.path;
       if (toolPath && isTrustedPath(toolPath, trustedDirs, this.ctx.workingDir)) {
         // Skip permission prompt — trusted directory

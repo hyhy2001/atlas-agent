@@ -1,52 +1,8 @@
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
-import { OpenAIProvider } from "../../provider/openai.js";
-import { ToolRegistry } from "../registry.js";
-import { ToolExecutor } from "../executor.js";
-import { runAgentLoop } from "../../agent/loop.js";
-import type { Message } from "../../provider/types.js";
-
-const ATLAS_MECH_PROMPT = `You are atlas-swift, a mechanical code executor. You ONLY apply exact edits provided to you.
-
-Rules:
-- Apply the exact old_string → new_string replacements specified
-- Run build/test commands if specified
-- Report immediately if old_string doesn't match or build fails
-- Do NOT discover code, do NOT expand scope, do NOT reason about alternatives
-- If anything is unclear or fails, report and STOP — do not retry`;
-
-const ATLAS_CODER_PROMPT = `You are atlas-forge, a code implementation agent. You implement features, fix bugs, refactor code, and write tests.
-
-Rules:
-- Follow the plan provided by the leader exactly
-- For code discovery, PREFER MCP tools when available:
-  - codebase-memory__search_graph: find functions/classes/routes by name or query
-  - codebase-memory__get_code_snippet: read source of a specific symbol
-  - codebase-memory__trace_path: find callers/callees, data flow
-  - codebase-memory__search_code: text search with graph ranking
-  - Fall back to read_file, grep, glob only when MCP tools are unavailable
-- Use edit_file and write_file to make changes
-- Run build and test commands with bash after changes
-- Report: files changed, diff summary, build/test results, blockers
-- Do NOT decide architecture or expand scope beyond the plan
-- Do NOT skip build/test verification`;
-
-const ATLAS_RESCUE_PROMPT = `You are atlas-deep, a deep investigation agent. You are called when atlas-forge has failed twice on the same task.
-
-Rules:
-- Start fresh — do NOT repeat the same approach that failed
-- Investigate root cause thoroughly before attempting a fix
-- PREFER MCP tools for deep investigation:
-  - codebase-memory__search_graph: find symbols, understand structure
-  - codebase-memory__trace_path: trace call chains and data flow
-  - codebase-memory__query_graph: complex multi-hop Cypher queries
-  - codebase-memory__get_architecture: understand project structure
-  - Fall back to read_file, grep, glob when MCP unavailable
-- Consider alternative approaches the previous attempts missed
-- Report your findings and proposed approach before making changes
-- Be thorough but surgical — fix the actual problem, not symptoms`;
+import { runSubagent, type AgentProfile } from "../../agent/runner.js";
 
 interface DelegateInput {
-  agent: "atlas-swift" | "atlas-forge" | "atlas-deep";
+  agent: AgentProfile;
   task: string;
   files?: string[];
   build_command?: string;
@@ -54,120 +10,51 @@ interface DelegateInput {
 }
 
 interface ParallelTask {
-  agent: "atlas-swift" | "atlas-forge" | "atlas-deep";
+  agent: AgentProfile;
   task: string;
   files?: string[];
   build_command?: string;
   test_command?: string;
 }
 
-async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext): Promise<string> {
-  const provider = (ctx as any)._provider as OpenAIProvider;
-  const registry = (ctx as any)._registry as ToolRegistry;
-  const hooks = (ctx as any)._hooks;
+interface LeaderCallbacks {
+  _onToolCall?: (name: string, summary: string, nested: boolean) => void;
+  _onSubagentDone?: (agent: string, toolUses: number, tokens: number, durationMs: number) => void;
+  _onDelegateStart?: (agent: string) => void;
+}
 
-  if (!provider || !registry) {
+async function executeSingleDelegate(task: ParallelTask, ctx: ExecutionContext): Promise<string> {
+  if (!ctx.provider || !ctx.registry) {
     return "Error: delegation not available (provider/registry not set)";
   }
 
-  let systemPrompt: string;
-  let subProvider: OpenAIProvider;
+  const leader = ctx.executor as unknown as LeaderCallbacks | undefined;
+  const onDelegateStart = leader?._onDelegateStart;
+  const onSubagentDone = leader?._onSubagentDone;
+  const onLeaderToolCall = leader?._onToolCall;
 
-  const fastModel = (ctx as any)._fastModel || process.env["ATLAS_FAST_MODEL"];
-  const reasoningModel = (ctx as any)._reasoningModel || process.env["ATLAS_REASONING_MODEL"];
+  if (onDelegateStart) onDelegateStart(task.agent);
 
-  switch (task.agent) {
-    case "atlas-swift":
-      systemPrompt = ATLAS_MECH_PROMPT;
-      subProvider = fastModel ? provider.withModel(fastModel) : provider;
-      break;
-    case "atlas-forge":
-      systemPrompt = ATLAS_CODER_PROMPT;
-      subProvider = fastModel ? provider.withModel(fastModel) : provider;
-      break;
-    case "atlas-deep":
-      systemPrompt = ATLAS_RESCUE_PROMPT;
-      subProvider = reasoningModel ? provider.withModel(reasoningModel) : provider;
-      break;
-  }
-
-  let fullTask = task.task;
-  if (task.files?.length) fullTask += `\n\nRelevant files: ${task.files.join(", ")}`;
-  if (task.build_command) fullTask += `\n\nAfter changes, run build: ${task.build_command}`;
-  if (task.test_command) fullTask += `\n\nAfter changes, run tests: ${task.test_command}`;
-
-  const messages: Message[] = [{ role: "user", content: fullTask }];
-
-  let subRegistry = registry;
-  if (task.agent === "atlas-swift") {
-    subRegistry = new ToolRegistry();
-    const allowed = ["read_file", "write_file", "edit_file", "bash"];
-    for (const tool of registry.getAll()) {
-      if (allowed.includes(tool.name)) subRegistry.register(tool);
-    }
-  }
-
-  const { PermissionSession } = await import("../../permissions/session.js");
-  const subPermissions = new PermissionSession();
-  subPermissions.grant("bash");
-  subPermissions.grant("write_file");
-  subPermissions.grant("edit_file");
-
-  const subCtx: ExecutionContext = {
-    workingDir: ctx.workingDir,
-    abortSignal: ctx.abortSignal,
-    permissions: subPermissions,
-  };
-
-  const subExecutor = new ToolExecutor(subRegistry, subCtx, hooks);
-
-  const leaderExecutor = (ctx as any)._executor;
-  const leaderOnToolCall = leaderExecutor ? (leaderExecutor as any)._onToolCall : null;
-  const leaderOnSubagentDone = leaderExecutor ? (leaderExecutor as any)._onSubagentDone : null;
-  const leaderOnDelegateStart = leaderExecutor ? (leaderExecutor as any)._onDelegateStart : null;
-  let toolUseCount = 0;
-  if (leaderOnToolCall) {
-    (subExecutor as any)._onToolCall = (name: string, summary: string) => {
-      toolUseCount++;
-      // Forward only the call, with nested=true. Skip _onToolResult to keep
-      // leader TUI clean — subagent's tool outputs would otherwise flood scrollback.
-      leaderOnToolCall(name, summary, true);
-    };
-  }
-  if (leaderOnDelegateStart) {
-    leaderOnDelegateStart(task.agent);
-  }
-  const startTime = Date.now();
-  let subTokens = 0;
-
-  try {
-    await runAgentLoop({
-      provider: subProvider,
-      messages,
-      toolRegistry: subRegistry,
-      executor: subExecutor,
-      systemPrompt,
+  const result = await runSubagent(
+    {
+      profile: task.agent,
+      task: task.task,
+      files: task.files,
+      buildCommand: task.build_command,
+      testCommand: task.test_command,
       abortSignal: ctx.abortSignal,
-      onText: () => {},
-      onTokens: (deltaTokens: number) => {
-        subTokens += deltaTokens;
-      },
-    });
-    if (leaderOnSubagentDone) {
-      const duration = Date.now() - startTime;
-      leaderOnSubagentDone(task.agent, toolUseCount, subTokens, duration);
-    }
-  } catch (err) {
-    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+      // Forward subagent tool calls with nested=true so the leader TUI shows
+      // them indented. Skipping tool results keeps leader scrollback clean.
+      onToolCall: onLeaderToolCall ? (name, summary) => onLeaderToolCall(name, summary, true) : undefined,
+    },
+    ctx,
+  );
+
+  if (onSubagentDone) {
+    onSubagentDone(task.agent, result.toolUseCount, result.tokens, result.durationMs);
   }
 
-  const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-  const result = (lastAssistant && lastAssistant.content) ? lastAssistant.content : "(no response)";
-  // Truncate to 2000 chars for leader TUI display — full result is in messages history
-  const truncated = typeof result === "string" && result.length > 2000
-    ? result.slice(0, 2000) + `\n… (${result.length - 2000} more chars)`
-    : result;
-  return typeof truncated === "string" ? truncated : String(truncated);
+  return result.output;
 }
 
 export const delegateTool: ToolDefinition = {

@@ -1,3 +1,8 @@
+import type { HooksConfig } from "../hooks.js";
+import type { OpenAIProvider } from "../provider/openai.js";
+import type { ToolExecutor } from "./executor.js";
+import type { ToolRegistry } from "./registry.js";
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -16,6 +21,14 @@ export interface ExecutionContext {
   workingDir: string;
   abortSignal: AbortSignal;
   permissions: SessionPermissions;
+  provider?: OpenAIProvider;
+  registry?: ToolRegistry;
+  executor?: ToolExecutor;
+  hooks?: HooksConfig;
+  fastModel?: string;
+  reasoningModel?: string;
+  trustedDirs?: string[];
+  askUser?: (question: string, options: string[]) => Promise<string>;
 }
 
 export interface SessionPermissions {

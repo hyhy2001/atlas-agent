@@ -251,15 +251,15 @@ async function main() {
   permissions.grantAll(settings.allowedTools);
 
   // Attach provider/registry/hooks to ctx for delegate tool
-  (ctx as any)._provider = provider;
-  (ctx as any)._registry = toolRegistry;
-  (ctx as any)._hooks = hooks;
-  (ctx as any)._fastModel = config.fastModel;
-  (ctx as any)._reasoningModel = config.reasoningModel;
-  (ctx as any)._trustedDirs = config.trustedDirs;
+  ctx.provider = provider;
+  ctx.registry = toolRegistry;
+  ctx.hooks = hooks;
+  ctx.fastModel = config.fastModel;
+  ctx.reasoningModel = config.reasoningModel;
+  ctx.trustedDirs = config.trustedDirs;
 
   const executor = new ToolExecutor(toolRegistry, ctx, hooks);
-  (ctx as any)._executor = executor;
+  ctx.executor = executor;
 
   const cleanup = async () => {
     for (const client of mcpClients) {

@@ -16,6 +16,9 @@ import { readManyFilesTool } from "./read_many_files.js";
 import { analyzeLogTool } from "./analyze_log.js";
 import { askUserQuestionTool } from "./ask_user_question.js";
 import { lspTool } from "./lsp.js";
+import { taskCreateTool, taskGetTool, taskListTool, taskUpdateTool, taskDeleteTool } from "./task.js";
+import { cronCreateTool, cronListTool, cronDeleteTool } from "./cron.js";
+import { teamCreateTool, teamDeleteTool, sendMessageTool } from "./team.js";
 
 export const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -43,4 +46,15 @@ export const builtinTools: ToolDefinition[] = [
   analyzeLogTool,
   askUserQuestionTool,
   lspTool,
+  taskCreateTool,
+  taskGetTool,
+  taskListTool,
+  taskUpdateTool,
+  taskDeleteTool,
+  cronCreateTool,
+  cronListTool,
+  cronDeleteTool,
+  teamCreateTool,
+  teamDeleteTool,
+  sendMessageTool,
 ];

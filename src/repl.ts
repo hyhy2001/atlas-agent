@@ -434,10 +434,10 @@ Keep it under 150 lines, concise and useful as AI context.`;
     if (input.startsWith("/trust")) {
       const dir = input.slice(6).trim() || ".";
       const resolved = path.resolve(process.cwd(), dir);
-      const trustedDirs = (executor as any).ctx?._trustedDirs ?? [];
+      const trustedDirs = executor.ctx?.trustedDirs ?? [];
       if (!trustedDirs.includes(resolved)) {
         trustedDirs.push(resolved);
-        (executor as any).ctx._trustedDirs = trustedDirs;
+        if (executor.ctx) executor.ctx.trustedDirs = trustedDirs;
       }
       console.log(`Trusted: ${resolved} (no permission prompts for files in this directory)`);
       return true;

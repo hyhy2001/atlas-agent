@@ -34,7 +34,7 @@ export const bashTool: ToolDefinition = {
 
     const destructive = detectDestructive(command);
     if (destructive.destructive) {
-      const askUser = (ctx as any)._askUser as ((q: string, opts: string[]) => Promise<string>) | undefined;
+      const askUser = ctx.askUser;
       if (askUser) {
         const answer = await askUser(
           `Run potentially destructive command? (${destructive.reason})\n${command.slice(0, 200)}`,

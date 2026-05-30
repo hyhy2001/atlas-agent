@@ -32,7 +32,7 @@ export const askUserQuestionTool: ToolDefinition = {
       return { toolUseId: "", content: "Error: need at least 2 options", isError: true };
     }
 
-    const askUser = (ctx as any)._askUser as ((question: string, options: string[]) => Promise<string>) | undefined;
+    const askUser = ctx.askUser;
 
     if (askUser) {
       const answer = await askUser(question, options);

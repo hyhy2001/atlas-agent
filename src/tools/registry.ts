@@ -52,6 +52,17 @@ export class ToolRegistry {
       "memory_append",
       "memory_read",
       "ask_user_question",
+      "task_create",
+      "task_get",
+      "task_list",
+      "task_update",
+      "task_delete",
+      "cron_create",
+      "cron_list",
+      "cron_delete",
+      "team_create",
+      "team_delete",
+      "send_message",
     ]);
     for (const tool of this.getAll()) {
       if (leaderTools.has(tool.name)) {

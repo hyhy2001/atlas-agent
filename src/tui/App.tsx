@@ -65,7 +65,7 @@ const TIPS = [
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
-  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "exit", "quit",
+  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "exit", "quit",
 ];
 
 interface AtSuggestion { path: string; indices?: number[] }
@@ -222,18 +222,20 @@ export const App: React.FC<AppProps> = (props) => {
   }, []);
 
   useEffect(() => {
-    (props.executor as any)._askUser = (question: string, options: string[]) => {
-      return new Promise<string>((resolve) => {
-        setQuestionOverlay({
-          question,
-          items: options.map(o => ({ label: o, value: o })),
-          selectedIndex: 0,
-          resolve,
+    if (props.executor.ctx) {
+      props.executor.ctx.askUser = (question: string, options: string[]) => {
+        return new Promise<string>((resolve) => {
+          setQuestionOverlay({
+            question,
+            items: options.map(o => ({ label: o, value: o })),
+            selectedIndex: 0,
+            resolve,
+          });
         });
-      });
-    };
+      };
+    }
     return () => {
-      (props.executor as any)._askUser = undefined;
+      if (props.executor.ctx) props.executor.ctx.askUser = undefined;
     };
   }, [props.executor]);
 
@@ -251,7 +253,7 @@ export const App: React.FC<AppProps> = (props) => {
       "/help","/save","/sessions","/load","/resume","/clear","/context",
       "/plan","/execute","/compact","/cost","/stats","/init","/bg",
       "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/mcp",
-      "/worktree","/trust",
+      "/worktree","/trust","/tasks","/cron","/team",
       ...(props.commands ?? []).map(c => `/${c.name}`),
     ];
     return allCmds.filter(c => c.startsWith(input)).slice(0, 8);
@@ -924,9 +926,9 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     if (value.startsWith("/trust")) {
       const dir = value.slice(6).trim() || ".";
       const resolved = path.resolve(process.cwd(), dir);
-      const trustedDirs = (props.executor as any).ctx?._trustedDirs ?? [];
+      const trustedDirs = props.executor.ctx?.trustedDirs ?? [];
       if (!trustedDirs.includes(resolved)) trustedDirs.push(resolved);
-      if ((props.executor as any).ctx) (props.executor as any).ctx._trustedDirs = trustedDirs;
+      if (props.executor.ctx) props.executor.ctx.trustedDirs = trustedDirs;
       addSystem(`Trusted: ${resolved} (no permission prompts for files in this directory)`);
       return true;
     }
@@ -1008,6 +1010,50 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         return true;
       }
       addSystem("Usage: /worktree [list|create <name>|enter <name>|exit|remove <name>]");
+      return true;
+    }
+    if (value === "/tasks") {
+      const { getTaskStore } = await import("../tasks/store.js");
+      const store = await getTaskStore(process.cwd());
+      const tasks = store.list();
+      if (tasks.length === 0) addSystem("No tasks.");
+      else {
+        const lines = tasks.map(t => {
+          const blocked = t.blockedBy.length > 0 ? `  [blocked by: ${t.blockedBy.map(b => "#" + b).join(", ")}]` : "";
+          const owner = t.owner ? `  (${t.owner})` : "";
+          return `  #${t.id} [${t.status}]${owner} ${t.subject}${blocked}`;
+        });
+        addSystem(`Tasks (${tasks.length}):\n${lines.join("\n")}`);
+      }
+      return true;
+    }
+    if (value === "/cron") {
+      const { getCronScheduler } = await import("../cron/scheduler.js");
+      const scheduler = getCronScheduler(path.join(process.cwd(), ".atlas", "cron.json"));
+      const jobs = scheduler.list();
+      if (jobs.length === 0) addSystem("No scheduled jobs.");
+      else {
+        const lines = jobs.map(j => {
+          const recurring = j.recurring ? " (recurring)" : "";
+          const durable = j.durable ? " [durable]" : "";
+          const promptShort = j.prompt.length > 50 ? j.prompt.slice(0, 50) + "…" : j.prompt;
+          return `  #${j.id} ${j.cron} — next: ${j.nextFireAt}${recurring}${durable} — "${promptShort}"`;
+        });
+        addSystem(`Scheduled jobs (${jobs.length}):\n${lines.join("\n")}`);
+      }
+      return true;
+    }
+    if (value === "/team") {
+      const { getTeamManager } = await import("../coordinator/team.js");
+      const teams = getTeamManager().list();
+      if (teams.length === 0) addSystem("No teams.");
+      else {
+        const lines = teams.map(t => {
+          const members = Array.from(t.members.values()).map(m => `${m.name}(${m.profile})`).join(", ");
+          return `  ${t.name} — ${t.members.size} members: ${members}`;
+        });
+        addSystem(`Teams (${teams.length}):\n${lines.join("\n")}`);
+      }
       return true;
     }
     const withoutSlash = value.slice(1);
