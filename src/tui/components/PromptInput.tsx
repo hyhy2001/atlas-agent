@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from "react";
-import { Box, Text, useCursor, measureElement, type DOMElement } from "ink";
+import React from "react";
+import { Box, Text } from "ink";
 
 import { formatTokenCount } from "../format.js";
 import { useTheme } from "../theme.js";
@@ -36,28 +36,7 @@ export function PromptInput({
   modelName,
 }: PromptInputProps) {
   const theme = useTheme();
-  const { setCursorPosition } = useCursor();
-  const inputRowRef = useRef<DOMElement | null>(null);
-
-  // Park the real terminal cursor at the caret so IME preedit (Vietnamese
-  // Telex, Japanese, Korean, Chinese) renders inline at the correct spot
-  // and doesn't double-commit base+composed characters.
-  // Without this, `Bây` typed via Telex lands as `Baây`.
   const prefix = planActive ? "[plan] " : multiline ? "[multiline] " : "❯ ";
-  const caretCol = 1 /* paddingX */ + [...prefix].length + [...input].length;
-
-  useEffect(() => {
-    type YogaNode = { yogaNode?: { getComputedTop: () => number }; parentNode?: YogaNode };
-    const node = inputRowRef.current as unknown as YogaNode | null;
-    if (!node?.yogaNode) return;
-    let y = 0;
-    let cur: YogaNode | null = node;
-    while (cur?.yogaNode) {
-      y += cur.yogaNode.getComputedTop();
-      cur = cur.parentNode ?? null;
-    }
-    setCursorPosition({ x: caretCol, y });
-  });
 
   return (
     <>
@@ -66,9 +45,10 @@ export function PromptInput({
           <Text color={theme.muted} dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 3 : 0)))}</Text>
           {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─"}</Text>}
         </Box>
-        <Box paddingX={1} ref={inputRowRef}>
+        <Box paddingX={1}>
           <Text color={theme.primary} bold>{prefix}</Text>
           <Text>{input}</Text>
+          <Text color={theme.muted}>█</Text>
         </Box>
         {input.startsWith("/") && input.length >= 1 && (
           <Box flexDirection="column" paddingX={2}>
