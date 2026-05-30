@@ -56,7 +56,7 @@ describe('serverForFile', () => {
 
   it('returns null for unknown extension', () => {
     expect(serverForFile('file.unknown')).toBeNull();
-    expect(serverForFile('file.rs')).toBeNull();
+    expect(serverForFile('file.go')).toBeNull();
     expect(serverForFile('Makefile')).toBeNull();
   });
 });

@@ -16,9 +16,10 @@ export interface ServerConfig {
   extensions: string[];
   command: string;
   args: string[];
-  installType?: "npm" | "pip";
+  installType?: "npm" | "pip" | "rustup";
   npmPackages?: string[];
   pipPackage?: string;
+  rustupComponent?: string;
   installHint?: string;
   rootMarkers: string[];
 }
@@ -73,6 +74,34 @@ export const SERVERS: ServerConfig[] = [
     command: "verible-verilog-ls",
     args: [],
     installHint: "Install verible-verilog-ls from https://github.com/chipsalliance/verible/releases",
+    rootMarkers: [".git"],
+  },
+  {
+    language: "rust",
+    extensions: [".rs"],
+    command: "rust-analyzer",
+    args: [],
+    installType: "rustup",
+    rustupComponent: "rust-analyzer",
+    installHint: "Install rust-analyzer: rustup component add rust-analyzer",
+    rootMarkers: ["Cargo.toml", ".git"],
+  },
+  {
+    language: "yaml",
+    extensions: [".yaml", ".yml"],
+    command: "yaml-language-server",
+    args: ["--stdio"],
+    installType: "npm",
+    npmPackages: ["yaml-language-server"],
+    rootMarkers: [".git"],
+  },
+  {
+    language: "json",
+    extensions: [".json", ".jsonc"],
+    command: "vscode-json-language-server",
+    args: ["--stdio"],
+    installType: "npm",
+    npmPackages: ["vscode-langservers-extracted"],
     rootMarkers: [".git"],
   },
 ];
@@ -130,6 +159,13 @@ export async function ensureServerInstalled(cfg: ServerConfig): Promise<InstallR
         await execAsync(`python3 -m venv "${venv}"`, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 });
       }
       await execAsync(`"${path.join(venv, "bin", "pip")}" install ${cfg.pipPackage}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+    } else if (cfg.installType === "rustup") {
+      try {
+        await which("rustup");
+      } catch {
+        return { ok: false, error: cfg.installHint ?? "rustup not found — install Rust from https://rustup.rs first" };
+      }
+      await execAsync(`rustup component add ${cfg.rustupComponent}`, { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
     }
     const resolved = await resolveServerCommand(cfg);
     if (!resolved) {
@@ -138,9 +174,14 @@ export async function ensureServerInstalled(cfg: ServerConfig): Promise<InstallR
     return { ok: true, command: resolved, installed: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const manualCmd = cfg.installType === "npm"
-      ? `npm install --prefix "${dir}" ${(cfg.npmPackages ?? []).join(" ")}`
-      : `python3 -m venv "${path.join(dir, "pyvenv")}" && "${path.join(dir, "pyvenv", "bin", "pip")}" install ${cfg.pipPackage}`;
+    let manualCmd: string;
+    if (cfg.installType === "npm") {
+      manualCmd = `npm install --prefix "${dir}" ${(cfg.npmPackages ?? []).join(" ")}`;
+    } else if (cfg.installType === "pip") {
+      manualCmd = `python3 -m venv "${path.join(dir, "pyvenv")}" && "${path.join(dir, "pyvenv", "bin", "pip")}" install ${cfg.pipPackage}`;
+    } else {
+      manualCmd = `rustup component add ${cfg.rustupComponent}`;
+    }
     return { ok: false, error: `Failed to install ${cfg.command}: ${msg}\nTry manually: ${manualCmd}` };
   }
 }
