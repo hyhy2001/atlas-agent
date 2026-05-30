@@ -46,8 +46,10 @@ export function PromptInput({
     <>
       <Box flexDirection="column" width={fullWidth}>
         <Box>
-          <Text color={theme.muted} dimColor>{"─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 3 : 0)))}</Text>
+          <Text color={theme.muted} dimColor>{"╭" + "─".repeat(Math.max(0, fullWidth - (gitBranch ? gitBranch.length + 4 : 2)))}</Text>
           {gitBranch && <Text color={theme.muted} dimColor>{" " + gitBranch + " ─"}</Text>}
+          {!gitBranch && <Text color={theme.muted} dimColor>{"╮"}</Text>}
+          {gitBranch && <Text color={theme.muted} dimColor>{"╮"}</Text>}
         </Box>
         <Box paddingX={2}>
           <Text color={theme.muted}>{prefix}</Text>
@@ -96,7 +98,7 @@ export function PromptInput({
           </Box>
         )}
         <Box>
-          <Text color={theme.muted} dimColor>{"─".repeat(fullWidth)}</Text>
+          <Text color={theme.muted} dimColor>{"╰" + "─".repeat(Math.max(0, fullWidth - 2)) + "╯"}</Text>
         </Box>
         <Box paddingX={2} justifyContent="space-between" width={fullWidth}>
           <Text color={theme.muted} dimColor>{
