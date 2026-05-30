@@ -67,7 +67,7 @@ const TIPS = [
 
 const COMMANDS = [
   "help", "save", "sessions", "load", "resume", "clear", "context", "plan", "execute", "compact", "cost", "stats",
-  "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "skills", "exit", "quit",
+  "version", "init", "diff", "undo", "agent", "agents", "model", "doctor", "output", "theme", "worktree", "trust", "tasks", "cron", "team", "skills", "exit", "quit",
 ];
 
 interface AtSuggestion { path: string; indices?: number[] }
@@ -253,7 +253,7 @@ export const App: React.FC<AppProps> = (props) => {
     if (!input.startsWith("/") || input.length < 1) return [];
     const allCmds = [
       "/help","/save","/sessions","/load","/resume","/clear","/context",
-      "/plan","/execute","/compact","/cost","/stats","/init","/bg",
+      "/plan","/execute","/compact","/cost","/stats","/version","/init","/bg",
       "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/mcp",
       "/worktree","/trust","/tasks","/cron","/team","/skills",
       ...(props.skills ?? []).map(s => `/${s.name}`),
@@ -677,6 +677,16 @@ export const App: React.FC<AppProps> = (props) => {
       if (chosen === "dark" || chosen === "light" || chosen === "monokai" || chosen === "solarized") {
         setThemeName(chosen);
         addSystem(`Theme: ${chosen}`);
+      }
+      return true;
+    }
+    if (value === "/version") {
+      try {
+        const pkg = await fs.readFile(path.join(process.cwd(), "package.json"), "utf-8");
+        const parsed = JSON.parse(pkg);
+        addSystem(`atlas ${parsed.version} — model: ${props.provider.getModel()}`);
+      } catch (err) {
+        addSystem(`Could not read version: ${err instanceof Error ? err.message : String(err)}`);
       }
       return true;
     }
