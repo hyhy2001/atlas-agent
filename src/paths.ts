@@ -7,6 +7,12 @@ import { homedir } from "node:os";
  * Used for: global settings, MCP binaries, default commands/agents.
  */
 export function getAtlasRoot(): string {
+  // Explicit override — highest priority. Set this when running atlas from
+  // a different directory than where it was installed.
+  if (process.env["ATLAS_ROOT"]) {
+    return process.env["ATLAS_ROOT"];
+  }
+
   const exe = process.execPath;
   const script = process.argv[1];
 

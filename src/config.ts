@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { readFileSync, existsSync } from "node:fs";
-import { join, isAbsolute } from "node:path";
+import { join, isAbsolute, dirname, resolve } from "node:path";
 import { paths, atlasRoot } from "./paths.js";
 
 const McpServerSchema = z.object({
@@ -46,16 +46,26 @@ function resolveMcpCommands(
   portableDir: string
 ): Array<{ name: string; command: string; args: string[]; autoApprove: boolean }> {
   const binDir = paths.bin();
+  const root = atlasRoot();
+  // Also try the directory containing the actual binary (for portable installs)
+  const exeDir = dirname(resolve(process.execPath));
+  const scriptDir = process.argv[1] ? dirname(resolve(process.argv[1])) : null;
+
   return servers.map((s) => {
     if (!isAbsolute(s.command)) {
-      const candidate = join(binDir, s.command);
-      if (existsSync(candidate)) {
-        return { ...s, command: candidate };
-      }
-      if (process.platform === "win32") {
-        const withExe = candidate + ".exe";
-        if (existsSync(withExe)) {
-          return { ...s, command: withExe };
+      const rel = s.command.replace(/^\.\//, "");
+      // Try candidates in priority order
+      const candidates = [
+        join(root, rel),           // atlasRoot (home or binary dir)
+        join(exeDir, rel),         // dir of the actual binary
+        scriptDir ? join(scriptDir, rel) : null,  // dir of the script
+        join(binDir, s.command),   // bare filename in binDir
+      ].filter(Boolean) as string[];
+
+      for (const c of candidates) {
+        if (existsSync(c)) return { ...s, command: c };
+        if (process.platform === "win32" && existsSync(c + ".exe")) {
+          return { ...s, command: c + ".exe" };
         }
       }
     }
