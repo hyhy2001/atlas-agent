@@ -18,13 +18,23 @@ export function getAtlasRoot(): string {
   // Bun compiled binary: argv[1] = "/$bunfs/..." (virtual FS), use execPath only.
   // Otherwise check both execPath dir and script dir.
   const isBunVfs = script.startsWith("/$bunfs/");
-  const candidates = isBunVfs
+  const seeds = isBunVfs
     ? [dirname(resolve(exe))]
     : [dirname(resolve(exe)), dirname(resolve(script))];
 
-  for (const dir of candidates) {
-    if (existsSync(join(dir, ".atlas", "settings.json"))) {
-      return dir;
+  // Walk up from each seed looking for .atlas/settings.json. This handles
+  // the wrapper-script case where argv[1] = "<install>/dist/cli.js" — we
+  // need to climb out of dist/ to find <install>/.atlas/settings.json.
+  // Stop at filesystem root.
+  for (const seed of seeds) {
+    let dir = seed;
+    for (let i = 0; i < 10; i++) {
+      if (existsSync(join(dir, ".atlas", "settings.json"))) {
+        return dir;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
     }
   }
 
