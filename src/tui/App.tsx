@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 
 import fs from "node:fs/promises";
@@ -29,8 +29,12 @@ import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { SubagentTree } from "./components/SubagentTree.js";
 import { PromptInput } from "./components/PromptInput.js";
 import { THEMES, ThemeContext, type ThemeName } from "./theme.js";
+import { useInputBuffer } from "./hooks/useInputBuffer.js";
 import type { HistoryEntry, OverlayItem, AgentTask } from "./types.js";
 import type { Skill } from "../skills.js";
+import { buildRegistry } from "./commands/builtin/index.js";
+import type { CommandSuggestion } from "./commands/registry.js";
+import type { SlashCommand } from "./commands/types.js";
 
 interface AppProps {
   provider: OpenAIProvider;
@@ -151,6 +155,14 @@ export const App: React.FC<AppProps> = (props) => {
     selectedIndex: number;
     resolve: (answer: string) => void;
   } | null>(null);
+  const [localJSX, setLocalJSX] = useState<React.ReactNode | null>(null);
+  const [submittedPlaceholder, setSubmittedPlaceholder] = useState<string | null>(null);
+  const { pushToBuffer, undo: undoBuffer, clearBuffer } = useInputBuffer();
+
+  const closeLocalJSX = useCallback((result?: string) => {
+    setLocalJSX(null);
+    if (result) setHistory(h => [...h, { type: "system", text: result }]);
+  }, []);
   const messagesRef = useRef<MessageParam[]>(props.initialSession?.messages ?? []);
   const sessionIdRef = useRef(props.initialSession?.id ?? generateSessionId());
   const sessionCreatedAtRef = useRef(props.initialSession?.createdAt ?? new Date().toISOString());
@@ -290,17 +302,43 @@ export const App: React.FC<AppProps> = (props) => {
     const [hits] = completer(input);
     return hits.find(h => h !== input) ?? null;
   })();
+
+  // Slash command registry — built once, refreshed when custom commands change.
+  // Tries registry first in handleCommand; legacy if-chain handles unmigrated.
+  const registry = React.useMemo(
+    () => buildRegistry(props.commands ?? []),
+    [props.commands],
+  );
+
   const slashCmds = (() => {
-    if (!input.startsWith("/") || input.length < 1) return [];
-    const allCmds = [
-      "/help","/save","/sessions","/load","/resume","/clear","/context",
-      "/plan","/execute","/compact","/cost","/stats","/version","/init","/bg",
-      "/diff","/undo","/agent","/agents","/model","/doctor","/output","/theme","/config","/mcp",
-      "/worktree","/trust","/tasks","/cron","/team","/skills",
-      ...(props.skills ?? []).map(s => `/${s.name}`),
-      ...(props.commands ?? []).map(c => `/${c.name}`),
-    ];
-    return allCmds.filter(c => c.startsWith(input)).slice(0, 8);
+    if (!input.startsWith("/") || input.length < 1) return [] as CommandSuggestion[];
+    const query = input.slice(1).split(/\s+/)[0] ?? "";
+    const fromRegistry = registry.search(query, 8);
+    const skillNames = new Set(fromRegistry.map(s => s.command.name));
+    const skillSuggestions: CommandSuggestion[] = (props.skills ?? [])
+      .filter(s => `/${s.name}`.startsWith(input) && !skillNames.has(s.name))
+      .slice(0, Math.max(0, 8 - fromRegistry.length))
+      .map(s => ({
+        command: {
+          kind: "prompt" as const,
+          name: s.name,
+          description: s.description ?? `Skill: ${s.name}`,
+          source: "skill" as const,
+          expand: async () => "",
+        },
+        score: 5,
+      }));
+    return [...fromRegistry, ...skillSuggestions].slice(0, 8);
+  })();
+
+  const commandArgumentHint = (() => {
+    if (!input.startsWith("/")) return null;
+    const parts = input.slice(1).split(/\s+/);
+    const name = parts[0] ?? "";
+    const hasSpace = input.includes(" ");
+    if (!hasSpace) return null;
+    const cmd = registry.find(name);
+    return cmd?.argumentHint ?? null;
   })();
 
   function addSystem(text: string) {
@@ -584,619 +622,159 @@ export const App: React.FC<AppProps> = (props) => {
   }
 
   async function handleCommand(value: string): Promise<boolean> {
-    if (value === "/save") {
-      await saveSession(buildSession());
-      addSystem(`Session saved: ${sessionIdRef.current}`);
-      return true;
-    }
-    if (value === "/sessions") {
-      const sessions = await listSessions();
-      addSystem(sessions.length ? sessions.map(s => `  ${s.id}  ${s.updatedAt.slice(0, 10)}  ${s.messageCount} msgs`).join("\n") : "No saved sessions.");
-      return true;
-    }
-    if (value.startsWith("/load ")) {
-      const id = value.slice(6).trim();
-      const session = await loadSession(id);
-      if (!session) addSystem(`Session not found: ${id}`);
-      else {
-        messagesRef.current = session.messages;
-        sessionIdRef.current = session.id;
-        addSystem(`Loaded session ${id} (${session.messageCount} messages)`);
-      }
-      return true;
-    }
-    if (value === "/resume") {
-      const sessions = await listSessions();
-      if (sessions.length === 0) {
-        addSystem("No saved sessions to resume.");
-        return true;
-      }
-      const items = sessions.slice(0, 10).map(s => {
-        const date = s.updatedAt.slice(0, 10);
-        const time = s.updatedAt.slice(11, 16);
-        const ago = formatTimeAgo(s.updatedAt);
-        return {
-          label: `${s.id}`,
-          sublabel: `${date} ${time} (${ago}) · ${s.messageCount} messages`,
-          value: s.id,
-        };
-      });
-      const chosenId = await new Promise<string>((resolve) => {
-        setQuestionOverlay({
-          question: "Resume which session?",
-          items,
-          selectedIndex: 0,
-          resolve,
-        });
-      });
-      if (!chosenId) {
-        addSystem("Resume cancelled.");
-        return true;
-      }
-      const session = await loadSession(chosenId);
-      if (!session) {
-        addSystem(`Session not found: ${chosenId}`);
-        return true;
-      }
-      messagesRef.current = session.messages;
-      sessionIdRef.current = session.id;
-      addSystem(`Resumed session ${chosenId} (${session.messageCount} messages)`);
-      return true;
-    }
-    if (value === "/clear") {
-      messagesRef.current = [];
-      sessionIdRef.current = generateSessionId();
-      addSystem("History cleared. Starting fresh session.");
-      return true;
-    }
-    if (value === "/config") {
-      const mainModel = props.provider.getModel();
-      const fastModel = fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? "(uses main)";
-      const reasoningModel = reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? "(uses main)";
-      const mcpCount = props.mcpStatus?.filter(m => m.status === "connected").length ?? 0;
-      const lines = [
-        `Atlas configuration:`,
-        ``,
-        `Models:`,
-        `  leader:    ${mainModel}`,
-        `  fast:      ${fastModel}`,
-        `  reasoning: ${reasoningModel}`,
-        ``,
-        `Session:`,
-        `  theme:        ${themeName}`,
-        `  output style: ${outputStyle}`,
-        `  permission:   ${PERM_MODE_LABELS[permMode]}`,
-        `  plan mode:    ${planActive ? "on" : "off"}`,
-        ``,
-        `Tools & extensions:`,
-        `  leader tools: ${props.toolRegistry.getAll().length}`,
-        `  total tools:  ${props.totalToolCount ?? props.toolRegistry.getAll().length}`,
-        `  MCP servers:  ${mcpCount} connected`,
-        `  skills:       ${props.skills?.length ?? 0}`,
-        `  subagents:    ${(props.subagents ?? []).length}`,
-        ``,
-        `Change: /model · /theme · /output · shift+tab (permission)`,
-      ];
-      addSystem(lines.join("\n"));
-      return true;
-    }
-    if (value === "/context") {
-      const CONTEXT_LIMIT = 200_000;
-      const sysTokens = Math.ceil((props.systemPrompt?.length ?? 0) / 4);
-      const msgTokens = Math.ceil(JSON.stringify(messagesRef.current).length / 4);
-      const toolTokens = Math.ceil(JSON.stringify(props.toolRegistry.getAll().map(t => ({ n: t.name, d: t.description, s: t.inputSchema }))).length / 4);
-      const used = sysTokens + msgTokens + toolTokens;
-      const pct = Math.min(100, Math.round((used / CONTEXT_LIMIT) * 100));
-      const barWidth = 30;
-      const filled = Math.round((pct / 100) * barWidth);
-      const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
-      const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-      const lines = [
-        `Context usage: ${bar} ${pct}%  (${fmt(used)} / ${fmt(CONTEXT_LIMIT)})`,
-        ``,
-        `  System prompt: ${fmt(sysTokens)} tokens`,
-        `  Messages (${messagesRef.current.length}): ${fmt(msgTokens)} tokens`,
-        `  Tool schemas (${props.toolRegistry.getAll().length}): ${fmt(toolTokens)} tokens`,
-        ``,
-        props.projectContextPath ? `Project context: ${props.projectContextPath}` : `No project context (run /init)`,
-        pct > 70 ? `\n⚠ Context >70% — consider /compact to free space.` : ``,
-      ].filter(Boolean);
-      addSystem(lines.join("\n"));
-      return true;
-    }
-    if (value === "/plan") {
-      planModeRef.current.enter();
-      setPlanActive(true);
-      addSystem("[Plan mode ON — agent can only read, not modify]");
-      return true;
-    }
-    if (value === "/execute" || value === "/do") {
-      planModeRef.current.exit();
-      setPlanActive(false);
-      addSystem("[Plan mode OFF — agent can now modify files]");
-      return true;
-    }
-    if (value === "/compact") {
-      const before = messagesRef.current.length;
-      if (before === 0) {
-        addSystem("Nothing to compact.");
-        return true;
-      }
-      addSystem("Compacting conversation...");
-      try {
-        const result = await compactMessages({
+    // Registry dispatch — try built-in/custom commands first.
+    // Unmigrated commands fall through to the legacy if-chain below.
+    const regName = value.slice(1).split(/\s+/)[0] ?? "";
+    const regArgs = value.slice(1 + regName.length).trimStart();
+    const registryCmd = registry.find(regName);
+    if (registryCmd) {
+      const ctx = {
+        addSystem,
+        args: regArgs,
+        cwd: process.cwd(),
+        setThemeName: (name: string) => setThemeName(name as ThemeName),
+        setOutputStyle: (style: "default" | "compact" | "verbose") => setOutputStyle(style),
+        app: {
+          themeName,
+          outputStyle,
+          subagents: props.subagents ?? listSubagents(),
+          enterPlanMode: () => { planModeRef.current.enter(); setPlanActive(true); },
+          exitPlanMode: () => { planModeRef.current.exit(); setPlanActive(false); },
+          tokens,
+          mainModel: props.provider.getModel(),
+          fastModel: fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? props.provider.getModel(),
+          reasoningModel: reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? props.provider.getModel(),
+          mcpCount: props.mcpStatus?.filter(m => m.status === "connected").length ?? 0,
+          permModeLabel: PERM_MODE_LABELS[permMode],
+          planActive,
+          leaderToolCount: props.toolRegistry.getAll().length,
+          totalToolCount: props.totalToolCount ?? props.toolRegistry.getAll().length,
+          skillCount: props.skills?.length ?? 0,
+          subagentCount: (props.subagents ?? []).length,
+          systemPromptLength: props.systemPrompt?.length ?? 0,
+          messageCount: messagesRef.current.length,
+          messagesJson: JSON.stringify(messagesRef.current),
+          toolsJson: JSON.stringify(props.toolRegistry.getAll().map(t => ({ n: t.name, d: t.description, s: t.inputSchema }))),
+          toolCount: props.toolRegistry.getAll().length,
+          projectContextPath: props.projectContextPath,
+          sessionId: sessionIdRef.current,
+          tools: props.toolRegistry.getAll().map(t => ({ name: t.name })),
+          mcpStatus: props.mcpStatus ?? [],
+          skills: props.skills ?? [],
           messages: messagesRef.current,
-          provider: props.provider,
-          config: DEFAULT_COMPACTION_CONFIG,
-        });
-        messagesRef.current = result.messages;
-        addSystem(`Compacted ${before} → ${result.messages.length} messages.\n\n## Summary\n\n${result.summary}`);
-        setHistory(h => [...h, { type: "compact_boundary", text: new Date().toLocaleTimeString() }]);
-      } catch (err) {
-        addSystem(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return true;
-    }
-    if (value === "/output") {
-      const chosen = await new Promise<string>((resolve) => {
-        setQuestionOverlay({
-          question: "Output style",
-          items: [
-            { label: "default", sublabel: "5 lines preview per tool result", value: "default" },
-            { label: "compact", sublabel: "1-line summary per tool result", value: "compact" },
-            { label: "verbose", sublabel: "Full output, no truncation", value: "verbose" },
-          ],
-          selectedIndex: ["default", "compact", "verbose"].indexOf(outputStyle),
-          resolve,
-        });
-      });
-      if (chosen === "default" || chosen === "compact" || chosen === "verbose") {
-        setOutputStyle(chosen);
-        addSystem(`Output style: ${chosen}`);
-      }
-      return true;
-    }
-    if (value === "/theme") {
-      const chosen = await new Promise<string>((resolve) => {
-        setQuestionOverlay({
-          question: "Theme",
-          items: [
-            { label: "dark", sublabel: "Cyan accents (default)", value: "dark" },
-            { label: "light", sublabel: "Blue accents", value: "light" },
-            { label: "monokai", sublabel: "Magenta + yellow", value: "monokai" },
-            { label: "solarized", sublabel: "Muted blue + cyan", value: "solarized" },
-          ],
-          selectedIndex: ["dark", "light", "monokai", "solarized"].indexOf(themeName),
-          resolve,
-        });
-      });
-      if (chosen === "dark" || chosen === "light" || chosen === "monokai" || chosen === "solarized") {
-        setThemeName(chosen);
-        addSystem(`Theme: ${chosen}`);
-        try {
-          const { paths } = await import("../paths.js");
-          const configPath = paths.config();
-          await fs.mkdir(path.dirname(configPath), { recursive: true });
-          let cfg: Record<string, unknown> = {};
-          try {
-            cfg = JSON.parse(await fs.readFile(configPath, "utf-8")) as Record<string, unknown>;
-          } catch {}
-          cfg.theme = chosen;
-          await fs.writeFile(configPath, JSON.stringify(cfg, null, 2), "utf-8");
-        } catch {}
-      }
-      return true;
-    }
-    if (value === "/version") {
-      try {
-        const pkg = await fs.readFile(path.join(process.cwd(), "package.json"), "utf-8");
-        const parsed = JSON.parse(pkg);
-        addSystem(`atlas ${parsed.version} — model: ${props.provider.getModel()}`);
-      } catch (err) {
-        addSystem(`Could not read version: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return true;
-    }
-    if (value === "/cost") {
-      const inCost = (tokens.input / 1_000_000) * 1.5;
-      const outCost = (tokens.output / 1_000_000) * 15.0;
-      const total = tokens.input + tokens.output;
-      const mainModel = props.provider.getModel();
-      const fastModel = fastModelRef.current ?? process.env["ATLAS_FAST_MODEL"] ?? mainModel;
-      const reasoningModel = reasoningModelRef.current ?? process.env["ATLAS_REASONING_MODEL"] ?? mainModel;
-      const cacheHitPct = tokens.input > 0 ? ((tokens.cached / tokens.input) * 100).toFixed(1) : "0.0";
-      const lines = [
-        `Token usage this session:`,
-        `  Input:     ${formatTokenCount(tokens.input)} tokens  (~$${inCost.toFixed(4)})`,
-        `  Output:    ${formatTokenCount(tokens.output)} tokens  (~$${outCost.toFixed(4)})`,
-        `  Total:     ${formatTokenCount(total)} tokens  (~$${(inCost + outCost).toFixed(4)})`,
-        tokens.cached > 0
-          ? `  Cached:    ${formatTokenCount(tokens.cached)} tokens  (${cacheHitPct}% cache hit)`
-          : `  Cached:    0 tokens  (no cache hits yet — proxy may not support prompt caching)`,
-        ``,
-        `Model tiers:`,
-        `  leader:    ${mainModel}`,
-        `  fast:      ${fastModel}`,
-        `  reasoning: ${reasoningModel}`,
-      ];
-      addSystem(lines.join("\n"));
-      return true;
-    }
-    if (value === "/stats" || value.startsWith("/stats ")) {
-      const arg = value.slice(6).trim();
-      const { getSessionStats, listAllSessionStats, formatStats } = await import("../telemetry.js");
-      if (arg === "all") {
-        const all = await listAllSessionStats();
-        addSystem(all.length ? all.slice(0, 10).map(formatStats).join("\n\n") : "No telemetry data.");
-      } else {
-        const stats = await getSessionStats(arg || sessionIdRef.current);
-        addSystem(stats ? formatStats(stats) : `No stats for session ${arg || "current"}.`);
-      }
-      return true;
-    }
-    if (value === "/help") {
-      addSystem(`Commands:\n  /save /sessions /load <id> /resume /clear /context\n  /plan /execute /compact /cost /stats [all|<id>] /init\n  /bg [list|<cmd>|kill <id>|log <id>] : background bash jobs\n  /diff [path] /undo /worktree [list|create|enter|exit|remove]\n  /agent <name> [prompt] /agents /model [tier] [name] /doctor /trust [dir]\n  /mcp : list connected MCP servers and their tools\n\nMulti-line: type \`\`\` to start/end a block, or end a line with \\ to continue\n@file.ts injects file content into your prompt`);
-      return true;
-    }
-    if (value === "/agents") {
-      const agents = props.subagents ?? listSubagents();
-      addSystem("Available agents:\n" + agents.map(a => `  ${a.name}  — ${a.description}`).join("\n"));
-      return true;
-    }
-    if (value === "/mcp") {
-      const all = props.toolRegistry.getAll();
-      // MCP tools are named "<server>__<tool>"
-      const byServer = new Map<string, string[]>();
-      for (const tool of all) {
-        const sep = tool.name.indexOf("__");
-        if (sep > 0) {
-          const server = tool.name.slice(0, sep);
-          const toolName = tool.name.slice(sep + 2);
-          if (!byServer.has(server)) byServer.set(server, []);
-          byServer.get(server)!.push(toolName);
-        }
-      }
-
-      const lines: string[] = [];
-      const mcpStatus = props.mcpStatus ?? [];
-
-      if (mcpStatus.length === 0 && byServer.size === 0) {
-        addSystem("No MCP servers configured.\n\nAdd servers in .atlas/settings.json under \"mcpServers\".");
-        return true;
-      }
-
-      // Show configured servers with status
-      for (const entry of mcpStatus) {
-        if (entry.status === "connected") {
-          lines.push(`● ${entry.name}  (${entry.toolCount} tools)  ✓ connected`);
-          const tools = byServer.get(entry.name) ?? [];
-          for (const t of tools) lines.push(`    ${t}`);
-        } else {
-          lines.push(`✗ ${entry.name}  — failed to connect`);
-          lines.push(`    command: ${entry.command}`);
-          if (entry.error) lines.push(`    error: ${entry.error}`);
-          lines.push(`    → If glibc mismatch: run  make build-mcp`);
-          lines.push(`    → If command not found: run  make install-mcp`);
-        }
-      }
-
-      // Show any MCP tools not in mcpStatus (edge case)
-      for (const [server, tools] of byServer) {
-        if (!mcpStatus.find(e => e.name === server)) {
-          lines.push(`● ${server}  (${tools.length} tools)`);
-          for (const t of tools) lines.push(`    ${t}`);
-        }
-      }
-
-      addSystem(lines.join("\n"));
-      return true;
-    }
-    if (value.startsWith("/agent ") || value === "/agent") {
-      const rest = value.slice(7).trim();
-      const spaceIdx = rest.indexOf(" ");
-      const agentName = spaceIdx === -1 ? rest : rest.slice(0, spaceIdx);
-      const agentPrompt = spaceIdx === -1 ? "" : rest.slice(spaceIdx + 1).trim();
-      const agents = props.subagents ?? listSubagents();
-      const profile = agents.find(a => a.name === agentName);
-      if (!profile) {
-        addSystem(`Usage: /agent <name> <prompt>\nAvailable agents:\n${agents.map(a => `  ${a.name}  — ${a.description}`).join("\n")}`);
-      } else if (!agentPrompt) {
-        // prompt the user for the agent prompt via the TUI: set pendingAgentPromptFor
-        setPendingAgentPromptFor(profile);
-      } else {
-        await runPrompt(agentPrompt, { registry: filterRegistryForSubagent(props.toolRegistry, profile), provider: profile.model ? props.provider.withModel(profile.model) : props.fastModel ? props.provider.withModel(props.fastModel) : props.provider, systemPrompt: profile.systemPrompt });
-      }
-      return true;
-    }
-    if (value === "/model" || value.startsWith("/model ")) {
-      const arg = value.slice(6).trim();
-      if (!arg) {
-        const mainModel = props.provider.getModel();
-        const fastModel = fastModelRef.current ?? "(uses main)";
-        const reasoningModel = reasoningModelRef.current ?? "(uses main)";
-        const chosen = await new Promise<string>((resolve) => {
-          setQuestionOverlay({
-            question: "Which model tier?",
-            items: [
-              { label: "main", sublabel: `${mainModel} — leader model`, value: "main" },
-              { label: "fast", sublabel: `${fastModel} — atlas-swift, atlas-forge`, value: "fast" },
-              { label: "reasoning", sublabel: `${reasoningModel} — atlas-deep`, value: "reasoning" },
-              { label: "show all", sublabel: "display current configuration", value: "show" },
-            ],
-            selectedIndex: 0,
-            resolve,
-          });
-        });
-        if (!chosen || chosen === "show") {
-          addSystem(`Models:\n  main:      ${mainModel}\n  fast:      ${fastModel}\n  reasoning: ${reasoningModel}`);
+          runPrompt: (text: string) => runPrompt(text),
+          addHistory: (entry: HistoryEntry) => setHistory(h => [...h, entry]),
+          executor: props.executor,
+          providerGetModel: () => props.provider.getModel(),
+          providerBaseUrl: (props.provider as any)._baseUrl,
+          replStartCwd: replStartCwdRef.current,
+          setModel: (tier: string, name: string) => {
+            if (tier === "main") Object.assign(props.provider, props.provider.withModel(name));
+            else if (tier === "fast") { fastModelRef.current = name; process.env["ATLAS_FAST_MODEL"] = name; }
+            else { reasoningModelRef.current = name; process.env["ATLAS_REASONING_MODEL"] = name; }
+          },
+          saveSession: async () => {
+            await saveSession(buildSession());
+            return sessionIdRef.current;
+          },
+          loadSession: async (id: string) => {
+            const session = await loadSession(id);
+            if (!session) return `Session not found: ${id}`;
+            messagesRef.current = session.messages;
+            sessionIdRef.current = session.id;
+            return `Loaded session ${id} (${session.messageCount} messages)`;
+          },
+          resumeSession: async () => {
+            const sessions = await listSessions();
+            if (!sessions.length) return "No saved sessions.";
+            const items = sessions.slice(0, 10).map(s => {
+              const date = s.updatedAt.slice(0, 10);
+              const time = s.updatedAt.slice(11, 16);
+              const ago = formatTimeAgo(s.updatedAt);
+              return {
+                label: `${s.id}`,
+                sublabel: `${date} ${time} (${ago}) · ${s.messageCount} messages`,
+                value: s.id,
+              };
+            });
+            const chosenId = await new Promise<string>((resolve) => {
+              setQuestionOverlay({
+                question: "Resume which session?",
+                items,
+                selectedIndex: 0,
+                resolve,
+              });
+            });
+            if (!chosenId) return "Resume cancelled.";
+            const session = await loadSession(chosenId);
+            if (!session) return `Session not found: ${chosenId}`;
+            messagesRef.current = session.messages;
+            sessionIdRef.current = session.id;
+            return `Resumed session ${chosenId} (${session.messageCount} messages)`;
+          },
+          compact: async () => {
+            const before = messagesRef.current.length;
+            if (before === 0) return "Nothing to compact.";
+            try {
+              const result = await compactMessages({
+                messages: messagesRef.current,
+                provider: props.provider,
+                config: DEFAULT_COMPACTION_CONFIG,
+              });
+              messagesRef.current = result.messages;
+              setHistory(h => [...h, { type: "compact_boundary", text: new Date().toLocaleTimeString() }]);
+              return `Compacted ${before} → ${result.messages.length} messages.\n\n## Summary\n\n${result.summary}`;
+            } catch (err) {
+              return `Compact failed: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          },
+          runAgent: async (name: string, prompt: string) => {
+            const agents = props.subagents ?? listSubagents();
+            const profile = agents.find(a => a.name === name);
+            if (!profile) return `Agent not found: ${name}`;
+            await runPrompt(prompt, {
+              registry: filterRegistryForSubagent(props.toolRegistry, profile),
+              provider: profile.model ? props.provider.withModel(profile.model) : props.fastModel ? props.provider.withModel(props.fastModel) : props.provider,
+              systemPrompt: profile.systemPrompt,
+            });
+            return "";
+          },
+          setPendingAgent: (name: string) => {
+            const agents = props.subagents ?? listSubagents();
+            const profile = agents.find(a => a.name === name);
+            if (profile) setPendingAgentPromptFor(profile);
+          },
+        },
+      };
+      if (registryCmd.kind === "local") {
+        const result = await registryCmd.call(ctx);
+        if (result.type === "text") { addSystem(result.value); return true; }
+        if (result.type === "exit") { exit(); return true; }
+        if (result.type === "clear") {
+          messagesRef.current = [];
+          setHistory([]);
+          setTokens({ input: 0, output: 0, cached: 0 });
+          setLiveTokens(0);
+          addSystem("Conversation cleared.");
           return true;
         }
-        addSystem(`Type the new model name for "${chosen}" tier.\nUsage: /model ${chosen} <model-name>`);
-        return true;
-      }
-      const parts = arg.split(/\s+/);
-      const tier = parts[0] === "fast" || parts[0] === "reasoning" || parts[0] === "main" ? parts[0] : "main";
-      const newModel = tier === "main" && parts[0] !== "main" ? arg : parts.slice(1).join(" ").trim();
-      if (!newModel) { addSystem(`Usage: /model ${tier} <name>`); return true; }
-      if (tier === "main") Object.assign(props.provider, props.provider.withModel(newModel));
-      else if (tier === "fast") { fastModelRef.current = newModel; process.env["ATLAS_FAST_MODEL"] = newModel; }
-      else { reasoningModelRef.current = newModel; process.env["ATLAS_REASONING_MODEL"] = newModel; }
-      addSystem(`${tier} model: ${newModel}`);
-      return true;
-    }
-    if (value === "/init" || value === "/init --force") {
-      const force = value.includes("--force");
-      // Check if ATLAS.md already exists
-      try {
-        await fs.access(path.join(process.cwd(), "ATLAS.md"));
-        if (!force) {
-          addSystem("ATLAS.md already exists. Use /init --force to regenerate.");
+        if (result.type === "skip") return true;
+        if (result.type === "submit") {
+          await handleSubmitRef.current(result.value);
           return true;
         }
-      } catch {}
-
-      addSystem("Scanning project structure...");
-
-      // Gather project info before running prompt
-      let projectInfo = "";
-      try {
-        const { execSync } = await import("node:child_process");
-        const tree = execSync(
-          "find . -maxdepth 3 -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' -not -path '*/deps/*' -not -path '*/.atlas/sessions/*' -not -path '*/.atlas/cache/*' -not -path '*/.atlas/telemetry/*' | sort 2>/dev/null",
-          { encoding: "utf8", cwd: process.cwd() }
-        ).slice(0, 3000);
-        projectInfo += `\nProject file tree:\n${tree}`;
-      } catch {}
-
-      try {
-        const pkg = await fs.readFile(path.join(process.cwd(), "package.json"), "utf-8");
-        const parsed = JSON.parse(pkg);
-        projectInfo += `\n\npackage.json: name=${parsed.name}, version=${parsed.version}`;
-        if (parsed.scripts) projectInfo += `\nScripts: ${Object.keys(parsed.scripts).join(", ")}`;
-        if (parsed.dependencies) projectInfo += `\nDependencies: ${Object.keys(parsed.dependencies).slice(0, 15).join(", ")}`;
-      } catch {}
-
-      await runPrompt(`Generate an ATLAS.md file for this project. Here is the scanned project context:
-${projectInfo}
-
-Create a concise ATLAS.md (under 150 lines) with these sections:
-1. **Project overview** — what this project does (1-2 sentences)
-2. **Key directories** — what each important directory contains
-3. **Build/run/test commands** — exact commands to build, run, test
-4. **Architecture** — main components and how they connect
-5. **Common tasks** — how to add features, run tests, debug
-6. **Conventions** — important patterns, constraints, or rules
-
-Write the file using write_file tool to ATLAS.md in the current directory.`);
-      return true;
-    }
-    if (value === "/bg" || value.startsWith("/bg ")) {
-      const arg = value.slice(3).trim();
-      const { startJob, listJobs, getJob, killJob, formatJob } = await import("./background.js");
-
-      if (!arg || arg === "list") {
-        const jobs = listJobs();
-        if (jobs.length === 0) {
-          addSystem("No background jobs.");
-        } else {
-          addSystem("Background jobs:\n" + jobs.map(formatJob).join("\n"));
-        }
         return true;
       }
-      if (arg.startsWith("kill ")) {
-        const id = arg.slice(5).trim();
-        addSystem(killJob(id) ? `Killed job ${id}` : `Job ${id} not found or already finished`);
+      if (registryCmd.kind === "prompt") {
+        const expanded = await registryCmd.expand(regArgs, ctx);
+        if (expanded.trim()) await runPrompt(expanded);
         return true;
       }
-      if (arg.startsWith("log ")) {
-        const id = arg.slice(4).trim();
-        const job = getJob(id);
-        if (!job) {
-          addSystem(`Job ${id} not found`);
-        } else {
-          const out = job.output.length > 4000 ? job.output.slice(-4000) + "\n[...output truncated to last 4000 chars]" : job.output;
-          addSystem(`[${id}] ${job.command}\n${formatJob(job)}\n\n${out || "(no output yet)"}`);
-        }
+      if (registryCmd.kind === "local-jsx") {
+        const node = await registryCmd.render(ctx, closeLocalJSX);
+        setLocalJSX(node ?? null);
         return true;
       }
-      const job = startJob(arg, process.cwd());
-      addSystem(`Started background job [${job.id}]: ${arg}\nUse "/bg log ${job.id}" to view output, "/bg kill ${job.id}" to stop.`);
-      return true;
-    }
-    if (value === "/diff" || value.startsWith("/diff ")) {
-      const arg = value.slice(5).trim();
-      // Get file-level summary first (--stat), then full diff
-      const stat = await new Promise<string>(resolve => {
-        const child = spawn("git", ["diff", "--stat", ...(arg ? ["--", arg] : [])], { cwd: process.cwd() });
-        let out = "";
-        child.stdout.on("data", d => { out += d.toString(); });
-        child.on("close", () => resolve(out.trim()));
-      });
-      const full = await new Promise<string>(resolve => {
-        const child = spawn("git", ["diff", "--color=always", ...(arg ? ["--", arg] : [])], { cwd: process.cwd() });
-        let out = "";
-        child.stdout.on("data", d => { out += d.toString(); });
-        child.stderr.on("data", d => { out += d.toString(); });
-        child.on("close", () => resolve(out));
-      });
-      if (!stat && !full.trim()) {
-        addSystem("No changes.");
-      } else {
-        const fileCount = stat.split("\n").filter(l => l.includes("|")).length;
-        const header = stat ? `── ${fileCount} file${fileCount !== 1 ? "s" : ""} changed ──\n${stat}\n${"─".repeat(40)}\n` : "";
-        addSystem(header + full.trim());
-      }
-      return true;
-    }
-    if (value === "/undo") {
-      const { popUndo } = await import("../undo.js");
-      const entry = popUndo();
-      if (!entry) addSystem("Nothing to undo.");
-      else {
-        if (entry.previousContent === null) await fs.unlink(entry.path);
-        else await fs.writeFile(entry.path, entry.previousContent, "utf-8");
-        addSystem(entry.previousContent === null ? `Undo: deleted ${entry.path}` : `Undo: restored ${entry.path}`);
-      }
-      return true;
-    }
-    if (value.startsWith("/trust")) {
-      const dir = value.slice(6).trim() || ".";
-      const resolved = path.resolve(process.cwd(), dir);
-      const trustedDirs = props.executor.ctx?.trustedDirs ?? [];
-      if (!trustedDirs.includes(resolved)) trustedDirs.push(resolved);
-      if (props.executor.ctx) props.executor.ctx.trustedDirs = trustedDirs;
-      addSystem(`Trusted: ${resolved} (no permission prompts for files in this directory)`);
-      return true;
-    }
-    if (value === "/doctor") {
-      const checks: string[] = [];
-      const baseUrl = process.env["ATLAS_BASE_URL"] ?? (props.provider as any)._baseUrl ?? "(not exposed)";
-      const authToken = process.env["ATLAS_AUTH_TOKEN"] ?? "";
-      checks.push(`Config:`);
-      checks.push(`  ATLAS_BASE_URL:    ${baseUrl ? "✓ set" : "✗ missing"}`);
-      checks.push(`  ATLAS_AUTH_TOKEN:  ${authToken ? "✓ set" : "✗ missing"}`);
-      checks.push(`  Model:             ${props.provider.getModel() || "✗ not set"}`);
-      checks.push(``);
-      const mcpList = props.mcpStatus ?? [];
-      checks.push(`MCP servers (${mcpList.length}):`);
-      if (mcpList.length === 0) {
-        checks.push(`  (none configured)`);
-      } else {
-        for (const s of mcpList) {
-          const icon = s.status === "connected" ? "✓" : "✗";
-          const detail = s.status === "connected" ? `${s.toolCount} tools` : (s.error ?? "failed");
-          checks.push(`  ${icon} ${s.name}  — ${detail}`);
-        }
-      }
-      checks.push(``);
-      checks.push(`Tools: ${props.totalToolCount ?? props.toolRegistry.getAll().length} registered`);
-      checks.push(``);
-      checks.push(`Session: ${sessionIdRef.current}`);
-      checks.push(`  Messages: ${messagesRef.current.length}`);
-      checks.push(`  Tokens:   ${formatTokenCount(tokens.input + tokens.output)}`);
-      addSystem(checks.join("\n"));
-      return true;
-    }
-    if (value === "/worktree" || value.startsWith("/worktree ")) {
-      const { listWorktrees, createWorktree, removeWorktree, hasUncommittedChanges } = await import("../worktree.js");
-      const parts = value.split(/\s+/);
-      const subcmd = parts[1] ?? "list";
-      if (subcmd === "list") {
-        const wts = await listWorktrees(replStartCwdRef.current);
-        addSystem(wts.length ? wts.map(wt => `  ${wt.branch}  ${wt.path}`).join("\n") : "No worktrees.");
-        return true;
-      }
-      if (subcmd === "create") {
-        const name = parts[2];
-        if (!name) addSystem("Usage: /worktree create <name>");
-        else {
-          const result = await createWorktree(replStartCwdRef.current, name);
-          addSystem(result.error ? `Error: ${result.error}` : `Created worktree: ${result.path}\nBranch: atlas/${name}\nUse /worktree enter ${name} to switch into it`);
-        }
-        return true;
-      }
-      if (subcmd === "enter") {
-        const name = parts[2];
-        if (!name) addSystem("Usage: /worktree enter <name>");
-        else {
-          const fsSync = await import("node:fs");
-          const wtPath = path.join(replStartCwdRef.current, ".atlas", "worktrees", name);
-          if (!fsSync.existsSync(wtPath)) addSystem(`Worktree not found: ${name}`);
-          else { process.chdir(wtPath); addSystem(`Switched to worktree: ${wtPath}`); }
-        }
-        return true;
-      }
-      if (subcmd === "exit") {
-        if (process.cwd() === replStartCwdRef.current) addSystem("Not currently in a worktree.");
-        else { process.chdir(replStartCwdRef.current); addSystem(`Returned to: ${replStartCwdRef.current}`); }
-        return true;
-      }
-      if (subcmd === "remove" || subcmd === "rm") {
-        const name = parts[2];
-        if (!name) addSystem("Usage: /worktree remove <name>");
-        else {
-          const wtPath = path.join(replStartCwdRef.current, ".atlas", "worktrees", name);
-          const force = parts[3] === "--force";
-          if (await hasUncommittedChanges(wtPath) && !force) addSystem("Worktree has uncommitted changes. Add --force to remove anyway.");
-          else {
-            const result = await removeWorktree(replStartCwdRef.current, name, force);
-            addSystem(result.error ? `Error: ${result.error}` : `Removed worktree: ${name}`);
-          }
-        }
-        return true;
-      }
-      addSystem("Usage: /worktree [list|create <name>|enter <name>|exit|remove <name>]");
-      return true;
-    }
-    if (value === "/tasks") {
-      const { getTaskStore } = await import("../tasks/store.js");
-      const store = await getTaskStore(process.cwd());
-      const tasks = store.list();
-      if (tasks.length === 0) addSystem("No tasks.");
-      else {
-        const lines = tasks.map(t => {
-          const blocked = t.blockedBy.length > 0 ? `  [blocked by: ${t.blockedBy.map(b => "#" + b).join(", ")}]` : "";
-          const owner = t.owner ? `  (${t.owner})` : "";
-          return `  #${t.id} [${t.status}]${owner} ${t.subject}${blocked}`;
-        });
-        addSystem(`Tasks (${tasks.length}):\n${lines.join("\n")}`);
-      }
-      return true;
-    }
-    if (value === "/cron") {
-      const { getCronScheduler } = await import("../cron/scheduler.js");
-      const scheduler = getCronScheduler(path.join(process.cwd(), ".atlas", "cron.json"));
-      const jobs = scheduler.list();
-      if (jobs.length === 0) addSystem("No scheduled jobs.");
-      else {
-        const lines = jobs.map(j => {
-          const recurring = j.recurring ? " (recurring)" : "";
-          const durable = j.durable ? " [durable]" : "";
-          const promptShort = j.prompt.length > 50 ? j.prompt.slice(0, 50) + "…" : j.prompt;
-          return `  #${j.id} ${j.cron} — next: ${j.nextFireAt}${recurring}${durable} — "${promptShort}"`;
-        });
-        addSystem(`Scheduled jobs (${jobs.length}):\n${lines.join("\n")}`);
-      }
-      return true;
-    }
-    if (value === "/team") {
-      const { getTeamManager } = await import("../coordinator/team.js");
-      const teams = getTeamManager().list();
-      if (teams.length === 0) addSystem("No teams.");
-      else {
-        const lines = teams.map(t => {
-          const members = Array.from(t.members.values()).map(m => `${m.name}(${m.profile})`).join(", ");
-          return `  ${t.name} — ${t.members.size} members: ${members}`;
-        });
-        addSystem(`Teams (${teams.length}):\n${lines.join("\n")}`);
-      }
-      return true;
-    }
-    if (value === "/skills") {
-      const list = props.skills ?? [];
-      if (list.length === 0) addSystem("No skills loaded.");
-      else addSystem("Skills:\n" + list.map(s => `  /${s.name} — ${s.description}`).join("\n"));
-      return true;
     }
     const skillMatch = (props.skills ?? []).find(s => value === `/${s.name}` || value.startsWith(`/${s.name} `));
     if (skillMatch) {
@@ -1223,7 +801,9 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       return pasteRefsRef.current.get(id) ?? _;
     });
     const trimmed = expanded.trim();
+    setSubmittedPlaceholder(trimmed);
     setInput("");
+    clearBuffer();
     if (trimmed && (inputHistoryRef.current.length === 0 || inputHistoryRef.current[inputHistoryRef.current.length - 1] !== trimmed)) {
       inputHistoryRef.current.push(trimmed);
     }
@@ -1275,6 +855,10 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
   useEffect(() => {
     queuedMessageRef.current = queuedMessage;
   }, [queuedMessage]);
+
+  useEffect(() => {
+    if (isRunning) setSubmittedPlaceholder(null);
+  }, [isRunning]);
 
   useEffect(() => {
     if (!isRunning && queuedMessageRef.current) {
@@ -1348,6 +932,17 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       return;
     }
 
+    // Ctrl+Z — undo input buffer first, then file-level undo
+    if (key.ctrl && inputChar === "z") {
+      const prev = undoBuffer();
+      if (prev) {
+        setInput(prev.text);
+        return;
+      }
+      handleSubmit("/undo");
+      return;
+    }
+
     // Ctrl+C handling
     if (key.ctrl && inputChar === "c") {
       if (isRunning) {
@@ -1402,7 +997,8 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
     // Tab → accept suggestion
     if (key.tab) {
       if (slashCmds.length > 0) {
-        setInput(slashCmds[slashCmdIndex] + " ");
+        const selected = slashCmds[slashCmdIndex];
+        if (selected) setInput("/" + selected.command.name + " ");
         setSlashCmdIndex(0);
         return;
       }
@@ -1433,7 +1029,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
         const chosen = slashCmds[slashCmdIndex];
         setInput("");
         setSlashCmdIndex(0);
-        handleSubmit(chosen);
+        if (chosen) handleSubmit("/" + chosen.command.name);
         return;
       }
       const value = input;
@@ -1446,7 +1042,9 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
 
     // Backspace
     if (key.backspace || key.delete) {
-      setInput((s) => s.slice(0, -1));
+      const newInput = input.slice(0, -1);
+      setInput(newInput);
+      pushToBuffer(newInput, 0);
       setAtSuggestions([]);
       return;
     }
@@ -1529,6 +1127,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
       // would clobber the backspace and leave "Baây" instead of "Bây".
       const newInput = input + inputChar;
       setInput(s => s + inputChar);
+      pushToBuffer(newInput, 0);
       setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
       if (atMatch) {
@@ -1572,6 +1171,12 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             <Text>{liveTail}</Text>
           </Box>
         )}
+        {submittedPlaceholder && !isRunning && (
+          <Box marginTop={1}>
+            <Text color={theme.user} bold>{"> "}</Text>
+            <Text bold>{submittedPlaceholder}</Text>
+          </Box>
+        )}
         {isRunning && <SubagentTree tasks={agentTasks} />}
         {isRunning && (
           <SpinnerLine
@@ -1584,6 +1189,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
             tip={tip}
           />
         )}
+        {localJSX}
         <PromptInput
           fullWidth={fullWidth}
           gitBranch={gitBranch}
@@ -1592,6 +1198,7 @@ Write the file using write_file tool to ATLAS.md in the current directory.`);
           input={input}
           slashCmds={slashCmds}
           slashCmdIndex={slashCmdIndex}
+          commandArgumentHint={commandArgumentHint}
           atSuggestions={atSuggestions}
           atSuggestionIndex={atSuggestionIndex}
           permMode={permMode}

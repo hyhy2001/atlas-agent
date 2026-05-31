@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 
 import { formatTokenCount } from "../format.js";
 import { useTheme } from "../theme.js";
+import type { CommandSuggestion } from "../commands/registry.js";
 
 interface PromptInputProps {
   fullWidth: number;
@@ -10,8 +11,9 @@ interface PromptInputProps {
   planActive: boolean;
   multiline: { mode: "ticks" | "slash"; lines: string[] } | null;
   input: string;
-  slashCmds: string[];
+  slashCmds: CommandSuggestion[];
   slashCmdIndex: number;
+  commandArgumentHint?: string | null;
   atSuggestions: { path: string; indices?: number[] }[];
   atSuggestionIndex: number;
   permMode: "ask" | "auto" | "plan";
@@ -30,6 +32,7 @@ export function PromptInput({
   input,
   slashCmds,
   slashCmdIndex,
+  commandArgumentHint = null,
   atSuggestions,
   atSuggestionIndex,
   permMode,
@@ -68,12 +71,44 @@ export function PromptInput({
         )}
         {input.startsWith("/") && input.length >= 1 && (
           <Box flexDirection="column" paddingX={2}>
-            {slashCmds.map((m, i) => (
-              <Text key={m} color={i === slashCmdIndex ? theme.primary : theme.muted} dimColor={i !== slashCmdIndex}>
-                {i === slashCmdIndex ? "› " : "  "}{m}
-              </Text>
-            ))}
-            {slashCmds.length > 0 && <Text color={theme.muted} dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>}
+            {slashCmds.map((s, i) => {
+              const isSelected = i === slashCmdIndex;
+              const name = s.command.name;
+              const desc = s.command.description;
+              const indices = new Set(s.indices ?? []);
+              return (
+                <Box key={name} justifyContent="space-between">
+                  <Box>
+                    <Text color={isSelected ? theme.suggestion : theme.muted}>
+                      {isSelected ? "› " : "  "}
+                    </Text>
+                    <Text>
+                      {name.split("").map((ch, ci) => (
+                        <Text
+                          key={ci}
+                          color={indices.has(ci) ? theme.suggestion : (isSelected ? "white" : theme.muted)}
+                          bold={indices.has(ci)}
+                          dimColor={!isSelected && !indices.has(ci)}
+                        >
+                          {ch}
+                        </Text>
+                      ))}
+                    </Text>
+                    {isSelected && desc && (
+                      <Text color={theme.muted} dimColor>{"  " + desc}</Text>
+                    )}
+                  </Box>
+                </Box>
+              );
+            })}
+            {commandArgumentHint && (
+              <Box paddingLeft={2}>
+                <Text color={theme.suggestion} dimColor>  {commandArgumentHint}</Text>
+              </Box>
+            )}
+            {slashCmds.length > 0 && (
+              <Text color={theme.muted} dimColor>  ↑↓ navigate  Tab · complete  ↵ · run</Text>
+            )}
           </Box>
         )}
         {atSuggestions.length > 0 && (
@@ -111,9 +146,9 @@ export function PromptInput({
               : "Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit"
           }</Text>
           {permMode === "auto" ? (
-            <Text color="green">⏵⏵ accept edits on <Text dimColor>(shift+tab to cycle)</Text></Text>
+            <Text color={theme.autoAccept}>⏵⏵ accept edits on <Text dimColor>(shift+tab to cycle)</Text></Text>
           ) : permMode === "plan" ? (
-            <Text color="yellow">⏸ plan mode on <Text dimColor>(shift+tab to cycle)</Text></Text>
+            <Text color={theme.planMode}>⏸ plan mode on <Text dimColor>(shift+tab to cycle)</Text></Text>
           ) : (
             <Text color={theme.muted} dimColor>shift+tab · {permModeLabels[permMode]}</Text>
           )}

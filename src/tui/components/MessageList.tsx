@@ -129,7 +129,7 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             return (
               <Box flexDirection="row">
                 {isFirstInGroup
-                  ? <Text color={theme.primary}>{"● "}</Text>
+                  ? <Text color={theme.claude}>{"● "}</Text>
                   : <Text>{"  "}</Text>
                 }
                 <Box flexDirection="column" flexGrow={1}>
