@@ -40,7 +40,7 @@ export function getAtlasRoot(): string {
 
 /**
  * Project directory — where user invoked atlas-agent.
- * Used for: per-project sessions, telemetry, memory, cache.
+ * Used for: per-project sessions, telemetry, memory.
  */
 export function getProjectRoot(): string {
   return process.cwd();
@@ -68,12 +68,16 @@ export const paths = {
   commands:   () => join(atlasRoot(), ".atlas", "commands"),
   agents:     () => join(atlasRoot(), ".atlas", "agents"),
   skills:     () => join(atlasRoot(), ".atlas", "skills"),
+  // Cache lives in install dir — codebase-memory-mcp stores per-project
+  // .db files (keyed by project path) so a single shared cache is fine.
+  // Putting it install-side keeps the install fully self-contained:
+  // no atlas-related state is written to user project dirs.
+  cache:      () => join(atlasRoot(), ".atlas", "cache"),
 
   // Project-level (per-project, based on cwd)
   project:    () => projectRoot(),
   projectAtlas: () => join(projectRoot(), ".atlas"),
   sessions:   () => join(projectRoot(), ".atlas", "sessions"),
   telemetry:  () => join(projectRoot(), ".atlas", "telemetry"),
-  cache:      () => join(projectRoot(), ".atlas", "cache"),
   memory:     () => join(projectRoot(), ".atlas", "memory"),
 };
