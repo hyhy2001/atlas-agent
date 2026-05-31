@@ -18,6 +18,7 @@ const ConfigSchema = z.object({
   authToken: z.string().optional(),
   systemPrompt: z.string().optional(),
   theme: z.enum(["dark", "light", "monokai", "solarized"]).default("dark"),
+  editorMode: z.enum(["normal", "vim"]).default("normal"),
   trustedDirs: z.array(z.string()).default([]),
   mcpServers: z.array(McpServerSchema).default([]),
 });

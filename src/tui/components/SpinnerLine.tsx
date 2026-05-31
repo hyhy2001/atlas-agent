@@ -27,7 +27,7 @@ export function SpinnerLine({
     <Box flexDirection="column">
       <Box>
         <Text color={theme.primary}>{spinFrames[spinFrame]}</Text>
-        <Text color={theme.muted}> {statusVerb} · {formatElapsed(elapsedSecs)}{liveTokens > 0 ? ` · ↓ ${formatTokenCount(liveTokens)} tokens` : ""}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt</Text>
+        <Text color={theme.muted}> {statusVerb} · {formatElapsed(elapsedSecs)}{liveTokens > 0 ? ` · ↓ ${formatTokenCount(liveTokens)} tokens` : ""}{currentToolName ? ` · ${formatToolName(currentToolName)}` : ""} · esc to interrupt · Ctrl+O transcript</Text>
       </Box>
       {tip && (
         <Box>

@@ -22,6 +22,7 @@ interface PromptInputProps {
   modelName: string;
   isRunning?: boolean;
   queuedMessage?: string | null;
+  vimMode?: "INSERT" | "NORMAL";
 }
 
 export function PromptInput({
@@ -41,6 +42,7 @@ export function PromptInput({
   modelName,
   isRunning = false,
   queuedMessage = null,
+  vimMode,
 }: PromptInputProps) {
   const theme = useTheme();
   const prefix = planActive ? "[plan] " : multiline ? "[multiline] " : "❯ ";
@@ -60,6 +62,9 @@ export function PromptInput({
         </Box>
         <Box paddingX={1}>
           <Text color={theme.muted}>{prefix}</Text>
+          {vimMode === "NORMAL" && (
+            <Text color={theme.planMode}>{"NORMAL "}</Text>
+          )}
           <Text>{input}</Text>
           <Text color={theme.muted}>█</Text>
         </Box>
@@ -142,8 +147,8 @@ export function PromptInput({
         <Box paddingX={2} justifyContent="space-between" width={fullWidth}>
           <Text color={theme.muted} dimColor>{
             isRunning
-              ? "↵ · queue message  Ctrl+C · interrupt  Ctrl+O · expand"
-              : "Tab · complete  ↵ · send  Ctrl+O · expand  Ctrl+C · exit"
+              ? "↵ · queue message  Ctrl+C · interrupt  Ctrl+O · transcript"
+              : "Tab · complete  ↵ · send  Ctrl+O · transcript  Ctrl+C · exit"
           }</Text>
           {permMode === "auto" ? (
             <Text color={theme.autoAccept}>⏵⏵ accept edits on <Text dimColor>(shift+tab to cycle)</Text></Text>

@@ -1,11 +1,11 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { OverlayItem } from "../types.js";
+import type { DialogRequest } from "../hooks/useDialogQueue.js";
 import { useTheme } from "../theme.js";
 import { Pane } from "./Pane.js";
 
 interface QuestionOverlayProps {
-  overlay: { question: string; items: OverlayItem[]; selectedIndex: number } | null;
+  overlay: DialogRequest | null;
   width: number;
 }
 

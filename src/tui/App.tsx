@@ -25,12 +25,18 @@ import {
 } from "./format.js";
 import { SpinnerLine } from "./components/SpinnerLine.js";
 import { MessageList } from "./components/MessageList.js";
+import { TranscriptPager } from "./components/TranscriptPager.js";
 import { QuestionOverlay } from "./components/QuestionOverlay.js";
+import { PermissionRequest, type PermissionKind } from "./components/PermissionRequest.js";
 import { SubagentTree } from "./components/SubagentTree.js";
 import { PromptInput } from "./components/PromptInput.js";
 import { THEMES, ThemeContext, type ThemeName } from "./theme.js";
 import { useInputBuffer } from "./hooks/useInputBuffer.js";
-import type { HistoryEntry, OverlayItem, AgentTask } from "./types.js";
+import { useDialogQueue } from "./hooks/useDialogQueue.js";
+import { useVim } from "./vim/useVim.js";
+import { usePermissionQueue } from "./hooks/usePermissionQueue.js";
+import { useTranscriptPager } from "./hooks/useTranscriptPager.js";
+import type { HistoryEntry, AgentTask } from "./types.js";
 import type { Skill } from "../skills.js";
 import { buildRegistry } from "./commands/builtin/index.js";
 import type { CommandSuggestion } from "./commands/registry.js";
@@ -66,7 +72,7 @@ const TIPS = [
   "Use /diff to see all changes made this session",
   "Use /agent to switch between subagent profiles",
   "Use /cost to see token usage and estimated cost",
-  "Ctrl+O expands truncated tool output",
+  "Ctrl+O opens the transcript pager",
   "Use /clear to start a fresh session",
 ];
 
@@ -149,15 +155,20 @@ export const App: React.FC<AppProps> = (props) => {
   const [slashCmdIndex, setSlashCmdIndex] = useState(0);
   const [multiline, setMultiline] = useState<{ mode: "ticks" | "slash"; lines: string[] } | null>(null);
   const [pendingAgentPromptFor, setPendingAgentPromptFor] = useState<SubagentProfile | null>(null);
-  const [questionOverlay, setQuestionOverlay] = useState<{
-    question: string;
-    items: OverlayItem[];
-    selectedIndex: number;
-    resolve: (answer: string) => void;
-  } | null>(null);
+  const {
+    focused: questionOverlay,
+    enqueue: enqueueDialog,
+    dismiss: dismissDialog,
+    answer: answerDialog,
+    setSelectedIndex: setOverlayIndex,
+  } = useDialogQueue();
+  const permQueue = usePermissionQueue();
   const [localJSX, setLocalJSX] = useState<React.ReactNode | null>(null);
   const [submittedPlaceholder, setSubmittedPlaceholder] = useState<string | null>(null);
   const { pushToBuffer, undo: undoBuffer, clearBuffer } = useInputBuffer();
+  const transcriptPager = useTranscriptPager();
+  const { vimState, handleVimInput, resetToInsert } = useVim();
+  const [cursorOffset, setCursorOffset] = useState(0);
 
   const closeLocalJSX = useCallback((result?: string) => {
     setLocalJSX(null);
@@ -184,6 +195,7 @@ export const App: React.FC<AppProps> = (props) => {
   const pasteRefsRef = useRef<Map<string, string>>(new Map());
   const pasteCounterRef = useRef(0);
   const queuedMessageRef = useRef<string | null>(null);
+  const vimEnabled = useRef(false);
   const handleSubmitRef = useRef<(value: string) => Promise<void>>(async () => {});
 
   // Truncate the input when it grows past 10k chars (paste-via-bracketed-mode
@@ -278,21 +290,53 @@ export const App: React.FC<AppProps> = (props) => {
 
   useEffect(() => {
     if (props.executor.ctx) {
-      props.executor.ctx.askUser = (question: string, options: string[]) => {
-        return new Promise<string>((resolve) => {
-          setQuestionOverlay({
-            question,
-            items: options.map(o => ({ label: o, value: o })),
-            selectedIndex: 0,
-            resolve,
+      props.executor.ctx.askUser = async (question: string, options: string[]) => {
+        const isPermission =
+          /\bAllow\b|\ballow\b|destructive|permission/i.test(question) ||
+          options.some(o => /^Yes/i.test(o) || /^No/i.test(o));
+        if (isPermission) {
+          let kind: PermissionKind = "generic";
+          let toolName = "Tool";
+          let detail: string | undefined;
+          let risk: "low" | "medium" | "high" = "medium";
+          const bashMatch = question.match(/(?:Run|destructive command\??)[^\n]*\n([\s\S]+)/i);
+          if (bashMatch || /\bcommand\b/i.test(question)) {
+            kind = "bash";
+            toolName = "bash";
+            detail = bashMatch ? bashMatch[1].trim() : undefined;
+            risk = /destructive/i.test(question) ? "high" : "medium";
+          } else if (/\bwrite\b|\bedit\b/i.test(question)) {
+            kind = "file_write";
+            toolName = /\bedit\b/i.test(question) ? "edit_file" : "write_file";
+            risk = "medium";
+          } else if (/\bfetch\b|\bhttp\b|\burl\b/i.test(question)) {
+            kind = "web_fetch";
+            toolName = "web_fetch";
+            risk = "low";
+          }
+          const { allowed } = await permQueue.request({
+            kind,
+            toolName,
+            description: question,
+            detail,
+            risk,
           });
+          const yes = options.find(o => /^Yes/i.test(o)) ?? options[0];
+          const no = options.find(o => /^No/i.test(o)) ?? options[1] ?? "";
+          return allowed ? yes : no;
+        }
+        return enqueueDialog({
+          kind: "prompt",
+          question,
+          items: options.map(o => ({ label: o, value: o })),
+          selectedIndex: 0,
         });
       };
     }
     return () => {
       if (props.executor.ctx) props.executor.ctx.askUser = undefined;
     };
-  }, [props.executor]);
+  }, [props.executor, enqueueDialog, permQueue]);
 
   const allCommandNames = [...COMMANDS, ...(props.commands ?? []).map(c => c.name)];
   const subagentNames = ["atlas-swift", "atlas-forge", "atlas-deep", ...(props.subagents ?? []).map(s => s.name)];
@@ -697,13 +741,11 @@ export const App: React.FC<AppProps> = (props) => {
                 value: s.id,
               };
             });
-            const chosenId = await new Promise<string>((resolve) => {
-              setQuestionOverlay({
-                question: "Resume which session?",
-                items,
-                selectedIndex: 0,
-                resolve,
-              });
+            const chosenId = await enqueueDialog({
+              kind: "prompt",
+              question: "Resume which session?",
+              items,
+              selectedIndex: 0,
             });
             if (!chosenId) return "Resume cancelled.";
             const session = await loadSession(chosenId);
@@ -796,6 +838,8 @@ export const App: React.FC<AppProps> = (props) => {
 
   const handleSubmit = async (value: string) => {
     if (!value.trim()) return;
+    if (vimEnabled.current) resetToInsert();
+    setCursorOffset(0);
     // Expand [paste #N: M lines] placeholders back to their full content
     const expanded = value.replace(/\[paste #(\d+): \d+ lines?\]/g, (_, id) => {
       return pasteRefsRef.current.get(id) ?? _;
@@ -869,66 +913,48 @@ export const App: React.FC<AppProps> = (props) => {
     }
   }, [isRunning]);
 
+  useEffect(() => {
+    import("../config.js").then(({ loadConfig }) => {
+      try {
+        vimEnabled.current = loadConfig().editorMode === "vim";
+      } catch {}
+    }).catch(() => {});
+  }, []);
+
   useInput((inputChar, key) => {
     if (questionOverlay) {
       if (key.upArrow) {
-        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.max(0, o.selectedIndex - 1) } : o);
+        setOverlayIndex(Math.max(0, questionOverlay.selectedIndex - 1));
         return;
       }
       if (key.downArrow) {
-        setQuestionOverlay(o => o ? { ...o, selectedIndex: Math.min(o.items.length - 1, o.selectedIndex + 1) } : o);
+        setOverlayIndex(Math.min(questionOverlay.items.length - 1, questionOverlay.selectedIndex + 1));
         return;
       }
       if (key.return) {
-        const overlay = questionOverlay;
-        setQuestionOverlay(null);
-        overlay.resolve(overlay.items[overlay.selectedIndex].value);
+        answerDialog(questionOverlay.items[questionOverlay.selectedIndex].value);
         return;
       }
       if (key.escape) {
-        const overlay = questionOverlay;
-        setQuestionOverlay(null);
-        overlay.resolve("");
+        dismissDialog();
         return;
       }
       if (inputChar >= "1" && inputChar <= "4") {
         const idx = parseInt(inputChar) - 1;
         if (idx < questionOverlay.items.length) {
-          const overlay = questionOverlay;
-          setQuestionOverlay(null);
-          overlay.resolve(overlay.items[idx].value);
+          answerDialog(questionOverlay.items[idx].value);
           return;
         }
       }
       return;
     }
 
-    // Ctrl+O: toggle expand/collapse most recent truncated tool result
     if (key.ctrl && inputChar === "o") {
-      setHistory(h => {
-        // If the last entry is already a tool_result_full, collapse it (toggle off)
-        if (h.length > 0 && h[h.length - 1].type === "tool_result_full") {
-          return h.slice(0, -1);
-        }
-        // Find the most recent tool_result entry that has hidden content
-        for (let i = h.length - 1; i >= 0; i--) {
-          const entry = h[i];
-          if (entry.type === "tool_result" && entry.fullText) {
-            const lineCount = entry.fullText.split("\n").length;
-            if (lineCount > 5) {
-              return [...h, {
-                type: "tool_result_full",
-                text: entry.fullText,
-                toolName: entry.toolName,
-                isError: entry.isError,
-                nested: entry.nested,
-              }];
-            }
-            return h;
-          }
-        }
-        return h;
-      });
+      if (transcriptPager.isOpen) {
+        transcriptPager.close();
+      } else {
+        transcriptPager.open(history.length);
+      }
       return;
     }
 
@@ -937,6 +963,7 @@ export const App: React.FC<AppProps> = (props) => {
       const prev = undoBuffer();
       if (prev) {
         setInput(prev.text);
+        setCursorOffset(prev.text.length);
         return;
       }
       handleSubmit("/undo");
@@ -972,6 +999,13 @@ export const App: React.FC<AppProps> = (props) => {
 
     if (isRunning) return;
 
+    if (vimEnabled.current) {
+      const result = handleVimInput(inputChar, key, input, cursorOffset);
+      if (result.text !== input) setInput(result.text);
+      if (result.offset !== cursorOffset) setCursorOffset(result.offset);
+      if (result.consumed) return;
+    }
+
     // Shift+Tab: cycle permission mode
     if (key.shift && key.tab) {
       setPermMode(m => {
@@ -1006,6 +1040,7 @@ export const App: React.FC<AppProps> = (props) => {
         const chosen = atSuggestions[atSuggestionIndex].path;
         const newVal = input.replace(/@([\w./\-]*)$/, `@${chosen}`);
         setInput(newVal);
+        setCursorOffset(newVal.length);
         if (chosen.endsWith("/")) {
           pendingAtQueryRef.current = chosen;
           getAtSuggestions(chosen).then(s => {
@@ -1034,6 +1069,7 @@ export const App: React.FC<AppProps> = (props) => {
       }
       const value = input;
       setInput("");
+      setCursorOffset(0);
       setSlashCmdIndex(0);
       setAtSuggestions([]);
       if (value.trim()) handleSubmit(value);
@@ -1042,9 +1078,12 @@ export const App: React.FC<AppProps> = (props) => {
 
     // Backspace
     if (key.backspace || key.delete) {
-      const newInput = input.slice(0, -1);
+      if (cursorOffset <= 0) return;
+      const newInput = input.slice(0, cursorOffset - 1) + input.slice(cursorOffset);
+      const newOffset = cursorOffset - 1;
       setInput(newInput);
-      pushToBuffer(newInput, 0);
+      setCursorOffset(newOffset);
+      pushToBuffer(newInput, newOffset);
       setAtSuggestions([]);
       return;
     }
@@ -1118,6 +1157,7 @@ export const App: React.FC<AppProps> = (props) => {
         if (pasteNoticeTimerRef.current) clearTimeout(pasteNoticeTimerRef.current);
         pasteNoticeTimerRef.current = setTimeout(() => setPasteNotice(null), 2000);
         setInput(newInput);
+        setCursorOffset(newInput.length);
         setSlashCmdIndex(0);
         return;
       }
@@ -1125,9 +1165,10 @@ export const App: React.FC<AppProps> = (props) => {
       // (e.g. a backspace event from the same tick when an IME splits a
       // chunk into DEL + composed char). Reading `input` from closure here
       // would clobber the backspace and leave "Baây" instead of "Bây".
-      const newInput = input + inputChar;
-      setInput(s => s + inputChar);
-      pushToBuffer(newInput, 0);
+      const newInput = input.slice(0, cursorOffset) + inputChar + input.slice(cursorOffset);
+      setInput(newInput);
+      setCursorOffset(cursorOffset + inputChar.length);
+      pushToBuffer(newInput, cursorOffset + inputChar.length);
       setSlashCmdIndex(0);
       const atMatch = newInput.match(/@([\w./\-]*)$/);
       if (atMatch) {
@@ -1149,65 +1190,95 @@ export const App: React.FC<AppProps> = (props) => {
   return (
     <ThemeContext.Provider value={theme}>
       <Box flexDirection="column">
-        <MessageList history={history} outputStyle={outputStyle} />
-        {liveTokens > 80000 && (
-          <Box paddingX={1}>
-            <Text color="yellow">{"⚠ "}</Text>
-            <Text color="yellow" dimColor>{"Context window >80% full — consider /compact to free space"}</Text>
-          </Box>
-        )}
-        {!liveTokens || liveTokens <= 80000 ? (() => {
-          const estimatedCost = (tokens.input / 1_000_000) * 1.5 + (tokens.output / 1_000_000) * 15.0;
-          return estimatedCost > 1.0 ? (
-            <Box paddingX={1}>
-              <Text color={theme.warning}>{"💰 "}</Text>
-              <Text color={theme.warning} dimColor>{`Estimated session cost: $${estimatedCost.toFixed(2)} — use /cost for breakdown`}</Text>
-            </Box>
-          ) : null;
-        })() : null}
-        <QuestionOverlay overlay={questionOverlay} width={overlayWidth} />
-        {liveTail && (
-          <Box>
-            <Text>{liveTail}</Text>
-          </Box>
-        )}
-        {submittedPlaceholder && !isRunning && (
-          <Box marginTop={1}>
-            <Text color={theme.user} bold>{"> "}</Text>
-            <Text bold>{submittedPlaceholder}</Text>
-          </Box>
-        )}
-        {isRunning && <SubagentTree tasks={agentTasks} />}
-        {isRunning && (
-          <SpinnerLine
-            spinFrame={spinFrame}
-            spinFrames={SPIN_FRAMES}
-            statusVerb={statusVerb}
-            elapsedSecs={elapsedSecs}
-            liveTokens={liveTokens}
-            currentToolName={currentToolName}
-            tip={tip}
+        {transcriptPager.isOpen ? (
+          <TranscriptPager
+            history={history}
+            frozenCount={transcriptPager.frozenCount}
+            searchQuery={transcriptPager.searchQuery}
+            searchOpen={transcriptPager.searchOpen}
+            dumpMode={transcriptPager.dumpMode}
+            outputStyle={outputStyle}
+            onClose={transcriptPager.close}
+            onOpenSearch={transcriptPager.openSearch}
+            onCloseSearch={transcriptPager.closeSearch}
+            onDumpMode={transcriptPager.enableDumpMode}
           />
+        ) : (
+          <>
+            <MessageList history={history} outputStyle={outputStyle} />
+            {liveTokens > 80000 && (
+              <Box paddingX={1}>
+                <Text color="yellow">{"⚠ "}</Text>
+                <Text color="yellow" dimColor>{"Context window >80% full — consider /compact to free space"}</Text>
+              </Box>
+            )}
+            {!liveTokens || liveTokens <= 80000 ? (() => {
+              const estimatedCost = (tokens.input / 1_000_000) * 1.5 + (tokens.output / 1_000_000) * 15.0;
+              return estimatedCost > 1.0 ? (
+                <Box paddingX={1}>
+                  <Text color={theme.warning}>{"💰 "}</Text>
+                  <Text color={theme.warning} dimColor>{`Estimated session cost: $${estimatedCost.toFixed(2)} — use /cost for breakdown`}</Text>
+                </Box>
+              ) : null;
+            })() : null}
+            {permQueue.pending && (
+              <PermissionRequest
+                kind={permQueue.pending.kind}
+                toolName={permQueue.pending.toolName}
+                description={permQueue.pending.description}
+                detail={permQueue.pending.detail}
+                risk={permQueue.pending.risk}
+                onAllow={permQueue.allow}
+                onDeny={permQueue.deny}
+                onAllowAlways={permQueue.allowAlways}
+              />
+            )}
+            <QuestionOverlay overlay={questionOverlay} width={overlayWidth} />
+            {liveTail && (
+              <Box>
+                <Text>{liveTail}</Text>
+              </Box>
+            )}
+            {submittedPlaceholder && !isRunning && (
+              <Box marginTop={1}>
+                <Text color={theme.user} bold>{"> "}</Text>
+                <Text bold>{submittedPlaceholder}</Text>
+              </Box>
+            )}
+            {isRunning && <SubagentTree tasks={agentTasks} />}
+            {isRunning && (
+              <SpinnerLine
+                spinFrame={spinFrame}
+                spinFrames={SPIN_FRAMES}
+                statusVerb={statusVerb}
+                elapsedSecs={elapsedSecs}
+                liveTokens={liveTokens}
+                currentToolName={currentToolName}
+                tip={tip}
+              />
+            )}
+            {localJSX}
+            <PromptInput
+              fullWidth={fullWidth}
+              gitBranch={gitBranch}
+              planActive={planActive}
+              multiline={multiline}
+              input={input}
+              slashCmds={slashCmds}
+              slashCmdIndex={slashCmdIndex}
+              commandArgumentHint={commandArgumentHint}
+              atSuggestions={atSuggestions}
+              atSuggestionIndex={atSuggestionIndex}
+              permMode={permMode}
+              permModeLabels={PERM_MODE_LABELS}
+              tokens={tokens}
+              modelName={props.provider.getModel()}
+              isRunning={isRunning}
+              queuedMessage={queuedMessage}
+              vimMode={vimState.mode}
+            />
+          </>
         )}
-        {localJSX}
-        <PromptInput
-          fullWidth={fullWidth}
-          gitBranch={gitBranch}
-          planActive={planActive}
-          multiline={multiline}
-          input={input}
-          slashCmds={slashCmds}
-          slashCmdIndex={slashCmdIndex}
-          commandArgumentHint={commandArgumentHint}
-          atSuggestions={atSuggestions}
-          atSuggestionIndex={atSuggestionIndex}
-          permMode={permMode}
-          permModeLabels={PERM_MODE_LABELS}
-          tokens={tokens}
-          modelName={props.provider.getModel()}
-          isRunning={isRunning}
-          queuedMessage={queuedMessage}
-        />
       </Box>
     </ThemeContext.Provider>
   );

@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Static, Text } from "ink";
 import type { HistoryEntry } from "../types.js";
 import { DiffBlock } from "./DiffBlock.js";
+import { StreamingText } from "./StreamingText.js";
 import { formatToolName, formatToolResult, isDiffOutput } from "../format.js";
 import { useTheme } from "../theme.js";
 
@@ -11,6 +12,10 @@ interface MessageListProps {
 }
 
 const READ_ONLY_TOOLS = ["read_file", "grep", "glob", "list_directory", "read_many_files"];
+const READ_SEARCH_TOOLS = new Set([
+  "read_file", "read_many_files", "grep", "glob", "list_directory",
+  "memory_read", "memory_search",
+]);
 const COLLAPSED_TOOLS = [
   ...READ_ONLY_TOOLS,
   "memory_save", "memory_append", "memory_read", "memory_delete",
@@ -101,15 +106,71 @@ export function groupConsecutiveToolCalls(history: HistoryEntry[]): HistoryEntry
   return out;
 }
 
+export function collapseReadSearchGroups(history: HistoryEntry[]): HistoryEntry[] {
+  const out: HistoryEntry[] = [];
+  let i = 0;
+  while (i < history.length) {
+    const entry = history[i]!;
+    if (entry.type === "tool_call" && entry.toolName && READ_SEARCH_TOOLS.has(entry.toolName)) {
+      const groupEntries: HistoryEntry[] = [];
+      let j = i;
+      while (j < history.length) {
+        const e = history[j]!;
+        if (e.type === "tool_call" && e.toolName && READ_SEARCH_TOOLS.has(e.toolName)) {
+          groupEntries.push(e);
+          j++;
+          if (j < history.length && history[j]!.type === "tool_result") {
+            groupEntries.push(history[j]!);
+            j++;
+          }
+        } else {
+          break;
+        }
+      }
+      const callCount = groupEntries.filter(e => e.type === "tool_call").length;
+      if (callCount >= 2) {
+        const counts: Record<string, number> = {};
+        for (const e of groupEntries) {
+          if (e.type === "tool_call" && e.toolName) {
+            counts[e.toolName] = (counts[e.toolName] ?? 0) + 1;
+          }
+        }
+        const parts: string[] = [];
+        const reads = (counts["read_file"] ?? 0) + (counts["read_many_files"] ?? 0);
+        const searches = (counts["grep"] ?? 0) + (counts["glob"] ?? 0);
+        const lists = counts["list_directory"] ?? 0;
+        const memReads = (counts["memory_read"] ?? 0) + (counts["memory_search"] ?? 0);
+        if (reads > 0) parts.push(`Read ${reads} file${reads > 1 ? "s" : ""}`);
+        if (searches > 0) parts.push(`Searched ${searches} time${searches > 1 ? "s" : ""}`);
+        if (lists > 0) parts.push(`Listed ${lists} director${lists > 1 ? "ies" : "y"}`);
+        if (memReads > 0) parts.push(`Recalled ${memReads} memor${memReads > 1 ? "ies" : "y"}`);
+        out.push({
+          type: "tool_call",
+          toolName: "more",
+          text: parts.join(", "),
+          nested: entry.nested,
+        });
+        i = j;
+        continue;
+      }
+    }
+    out.push(entry);
+    i++;
+  }
+  return out;
+}
+
 export function MessageList({ history, outputStyle = "default" }: MessageListProps) {
   const theme = useTheme();
-  const displayed = groupConsecutiveToolCalls(history);
+  const displayed = collapseReadSearchGroups(groupConsecutiveToolCalls(history));
   return (
     <Static items={displayed}>
       {(entry, index) => {
         // Add top margin when a tool_call follows assistant text (cc-ref addMargin pattern)
         const prev = index > 0 ? displayed[index - 1] : null;
-        const addMargin = entry.type === "tool_call" && prev?.type === "assistant";
+        const addMargin =
+          (entry.type === "tool_call" && prev?.type === "assistant") ||
+          (entry.type === "assistant" && prev?.type === "tool_result");
         return (
         <Box key={index} flexDirection="column" marginTop={addMargin ? 1 : 0} marginBottom={entry.type === "user" || entry.type === "banner" ? 1 : 0}>
           {entry.type === "banner" && (
@@ -133,7 +194,7 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
                   : <Text>{"  "}</Text>
                 }
                 <Box flexDirection="column" flexGrow={1}>
-                  <Text>{entry.text}</Text>
+                  <StreamingText text={entry.text} />
                 </Box>
               </Box>
             );
@@ -205,8 +266,10 @@ export function MessageList({ history, outputStyle = "default" }: MessageListPro
             </Box>
           )}
           {entry.type === "compact_boundary" && (
-            <Box>
-              <Text color={theme.muted} dimColor>{"─── compacted ─── " + entry.text + " ───"}</Text>
+            <Box marginY={1}>
+              <Text color={theme.muted} dimColor>{"─── ✦ compacted "}</Text>
+              <Text color={theme.claude} dimColor>{entry.text}</Text>
+              <Text color={theme.muted} dimColor>{" ✦ ───"}</Text>
             </Box>
           )}
           {entry.type === "system" && (
