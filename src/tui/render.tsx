@@ -22,6 +22,57 @@ import type { Skill } from "../skills.js";
 // Mirror the cc-ref approach: split each chunk so embedded DEL bytes are
 // emitted as their own events. Ink then parses each DEL into key.backspace
 // independently of the composed character that follows.
+
+// Vietnamese Telex/VNI base letter → composed variants mapping.
+// When IBus/fcitx leaks the raw ASCII before the composed char, we drop the raw.
+const VIETNAMESE_BASE_TO_COMPOSED: Map<number, Set<number>> = (() => {
+  const map = new Map<number, Set<number>>();
+  const pairs: [string, string][] = [
+    ["a", "àáâãảạăắặằẳẵấầẩẫậÀÁÂÃẢẠĂẮẶẰẲẴẤẦẨẪẬ"],
+    ["e", "èéêềếểễệÈÉÊỀẾỂỄỆ"],
+    ["i", "ìíỉĩịÌÍỈĨỊ"],
+    ["o", "òóôơồốổỗộờớởỡợÒÓÔƠỒỐỔỖỘỜỚỞỠỢ"],
+    ["u", "ùúưừứửữựÙÚƯỪỨỬỮỰ"],
+    ["y", "ỳýỷỹỵỲÝỶỸỴ"],
+    ["d", "đĐ"],
+    ["A", "ÀÁÂÃẢẠĂẮẶẰẲẴẤẦẨẪẬ"],
+    ["E", "ÈÉÊỀẾỂỄỆ"],
+    ["I", "ÌÍỈĨỊ"],
+    ["O", "ÒÓÔƠỒỐỔỖỘỜỚỞỠỢ"],
+    ["U", "ÙÚƯỪỨỬỮỰ"],
+    ["Y", "ỲÝỶỸỴ"],
+    ["D", "Đ"],
+  ];
+  for (const [base, composed] of pairs) {
+    const baseCode = base.charCodeAt(0);
+    const set = new Set<number>();
+    for (const ch of composed) {
+      set.add(Buffer.from(ch, "utf8")[0]!);
+    }
+    map.set(baseCode, set);
+  }
+  return map;
+})();
+
+function dedupeImeCompose(buf: Buffer): Buffer {
+  if (buf.length < 2) return buf;
+
+  const first = buf[0]!;
+  if (first < 0x41 || (first > 0x5a && first < 0x61) || first > 0x7a) return buf;
+
+  const second = buf[1]!;
+  if (second < 0xc0) return buf;
+
+  const composedSet = VIETNAMESE_BASE_TO_COMPOSED.get(first);
+  if (!composedSet) return buf;
+
+  if (composedSet.has(second)) {
+    return buf.slice(1);
+  }
+
+  return buf;
+}
+
 function createImeAwareStdin(real: NodeJS.ReadStream): NodeJS.ReadStream {
   const proxy: PassThrough & {
     isTTY?: boolean;
@@ -41,15 +92,21 @@ function createImeAwareStdin(real: NodeJS.ReadStream): NodeJS.ReadStream {
 
   real.on("data", (chunk: Buffer | string) => {
     const buf = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+
+    const segments: Buffer[] = [];
     let start = 0;
     for (let i = 0; i < buf.length; i++) {
       if (buf[i] === 0x7f) {
-        if (i > start) proxy.write(buf.slice(start, i));
-        proxy.write(Buffer.from([0x7f]));
+        if (i > start) segments.push(buf.slice(start, i));
+        segments.push(Buffer.from([0x7f]));
         start = i + 1;
       }
     }
-    if (start < buf.length) proxy.write(buf.slice(start));
+    if (start < buf.length) segments.push(buf.slice(start));
+
+    for (const seg of segments) {
+      proxy.write(dedupeImeCompose(seg));
+    }
   });
   real.on("end", () => proxy.end());
 
