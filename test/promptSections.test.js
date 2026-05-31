@@ -24,7 +24,9 @@ describe('getRoleSection', () => {
     expect(getRoleSection('atlas-swift')).toContain('mechanical');
   });
   it('atlas-forge mentions MCP tools', () => {
-    expect(getRoleSection('atlas-forge')).toContain('codebase-memory__search_graph');
+    const s = getRoleSection('atlas-forge');
+    expect(s).toContain('search_graph');
+    expect(s).toContain('get_code_snippet');
   });
   it('atlas-deep mentions root cause', () => {
     expect(getRoleSection('atlas-deep')).toContain('root cause');

@@ -9,14 +9,8 @@ import {
   getRoleSection,
   getToneSection,
   getActionsCareSection,
-  getNumericLengthAnchorsSection,
-  getFaithfulReportingSection,
   getDoingTasksSection,
-  getCommentsSection,
-  getVerificationSection,
   getUsingToolsSection,
-  getSystemHygieneSection,
-  getResultClearingSection,
   getEnvSection,
   DYNAMIC_BOUNDARY,
 } from "./prompt_sections.js";
@@ -29,8 +23,6 @@ function buildExecutorPrompt(profile: AgentProfile, model?: string): string {
   if (profile === "atlas-swift") {
     return [
       getRoleSection("atlas-swift"),
-      getNumericLengthAnchorsSection(),
-      getFaithfulReportingSection(),
       getActionsCareSection(),
       DYNAMIC_BOUNDARY,
       getEnvSection({ model }),
@@ -40,15 +32,9 @@ function buildExecutorPrompt(profile: AgentProfile, model?: string): string {
   return [
     getRoleSection(profile),
     getDoingTasksSection(),
-    getCommentsSection(),
     getUsingToolsSection(),
-    getVerificationSection(),
     getToneSection(),
     getActionsCareSection(),
-    getSystemHygieneSection(),
-    getResultClearingSection(),
-    getNumericLengthAnchorsSection(),
-    getFaithfulReportingSection(),
     DYNAMIC_BOUNDARY,
     getEnvSection({ model }),
   ].filter(Boolean).join("\n\n");

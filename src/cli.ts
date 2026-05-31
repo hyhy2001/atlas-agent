@@ -110,6 +110,12 @@ async function main() {
 
   const config = loadConfig(args.model ? { model: args.model } : undefined);
 
+  // Headless (-p / --print) defaults to simple-mode prompt unless caller set
+  // ATLAS_SIMPLE explicitly. Keeps interactive sessions on the full prompt.
+  if (args.print && process.env["ATLAS_SIMPLE"] === undefined) {
+    process.env["ATLAS_SIMPLE"] = "1";
+  }
+
   // Resolve system prompt: default → config → env → --system-prompt → --system-prompt-file
   // Built per-session with env (cwd, git, model) injected after the dynamic boundary.
   let systemPrompt: string = buildLeaderPrompt({ model: config.model });
