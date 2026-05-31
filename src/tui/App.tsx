@@ -8,7 +8,7 @@ import type { OpenAIProvider } from "../provider/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import type { MessageParam } from "../provider/types.js";
-import { generateSessionId, listSessions, loadSession, saveSession, type Session } from "../sessions.js";
+import { generateSessionId, generateSessionTitle, listSessions, loadSession, saveSession, type Session } from "../sessions.js";
 import type { CustomCommand } from "../commands.js";
 import { filterRegistryForSubagent, listSubagents, type SubagentProfile } from "../agent/subagents.js";
 import type { HooksConfig } from "../hooks.js";
@@ -111,15 +111,44 @@ export function formatApiError(err: unknown): string {
   return `Error: ${msg}`;
 }
 
+function rebuildHistoryFromMessages(messages: MessageParam[]): HistoryEntry[] {
+  const entries: HistoryEntry[] = [];
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      const rawContent = msg.content as unknown;
+      const content = typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
+          : "";
+      if (content.trim()) entries.push({ type: "user", text: content });
+    } else if (msg.role === "assistant") {
+      const rawContent = msg.content as unknown;
+      const content = typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n")
+          : "";
+      if (content.trim()) entries.push({ type: "assistant", text: content });
+    }
+  }
+  return entries;
+}
+
 export const App: React.FC<AppProps> = (props) => {
   const { exit } = useApp();
   const model = props.provider.getModel();
   const leaderTools = props.toolRegistry.getAll().length;
   const totalTools = props.totalToolCount ?? leaderTools;
   const [input, setInput] = useState("");
-  const [history, setHistory] = useState<HistoryEntry[]>(
-    props.bannerText ? [{ type: "banner", text: props.bannerText }] : []
-  );
+  const [history, setHistory] = useState<HistoryEntry[]>(() => {
+    const entries: HistoryEntry[] = [];
+    if (props.bannerText) entries.push({ type: "banner", text: props.bannerText });
+    if (props.initialSession?.messages) {
+      entries.push(...rebuildHistoryFromMessages(props.initialSession.messages));
+    }
+    return entries;
+  });
   const [isRunning, setIsRunning] = useState(false);
   const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   const [pasteNotice, setPasteNotice] = useState<string | null>(null);
@@ -397,6 +426,7 @@ export const App: React.FC<AppProps> = (props) => {
       model: props.provider.getModel(),
       messageCount: messagesRef.current.length,
       messages: messagesRef.current,
+      title: generateSessionTitle(messagesRef.current),
     };
   }
 
@@ -725,6 +755,7 @@ export const App: React.FC<AppProps> = (props) => {
             const session = await loadSession(id);
             if (!session) return `Session not found: ${id}`;
             messagesRef.current = session.messages;
+            setHistory(rebuildHistoryFromMessages(session.messages));
             sessionIdRef.current = session.id;
             return `Loaded session ${id} (${session.messageCount} messages)`;
           },
@@ -735,9 +766,10 @@ export const App: React.FC<AppProps> = (props) => {
               const date = s.updatedAt.slice(0, 10);
               const time = s.updatedAt.slice(11, 16);
               const ago = formatTimeAgo(s.updatedAt);
+              const title = s.title ? `"${s.title}"` : s.id;
               return {
-                label: `${s.id}`,
-                sublabel: `${date} ${time} (${ago}) · ${s.messageCount} messages`,
+                label: title,
+                sublabel: `${s.id} · ${date} ${time} (${ago}) · ${s.messageCount} msgs`,
                 value: s.id,
               };
             });
@@ -751,6 +783,7 @@ export const App: React.FC<AppProps> = (props) => {
             const session = await loadSession(chosenId);
             if (!session) return `Session not found: ${chosenId}`;
             messagesRef.current = session.messages;
+            setHistory(rebuildHistoryFromMessages(session.messages));
             sessionIdRef.current = session.id;
             return `Resumed session ${chosenId} (${session.messageCount} messages)`;
           },

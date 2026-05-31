@@ -11,7 +11,10 @@ export const sessionsCommand: LocalCommand = {
     if (!sessions.length) return { type: "text", value: "No saved sessions." };
     return {
       type: "text",
-      value: sessions.map(s => `  ${s.id}  ${s.updatedAt.slice(0, 10)}  ${s.messageCount} msgs`).join("\n"),
+      value: sessions.map(s => {
+        const title = s.title ? `  "${s.title}"` : "";
+        return `  ${s.id}${title}  ${s.updatedAt.slice(0, 10)}  ${s.messageCount} msgs`;
+      }).join("\n"),
     };
   },
 };

@@ -11,6 +11,7 @@ export interface Session {
   model: string;
   messageCount: number;
   messages: MessageParam[];
+  title?: string;
 }
 
 export interface SessionMeta {
@@ -19,6 +20,19 @@ export interface SessionMeta {
   updatedAt: string;
   model: string;
   messageCount: number;
+  title?: string;
+}
+
+export function generateSessionTitle(messages: MessageParam[]): string {
+  const firstUser = messages.find(m => m.role === "user");
+  if (!firstUser) return "";
+  const rawContent = firstUser.content as unknown;
+  const content = typeof rawContent === "string"
+    ? rawContent
+    : Array.isArray(rawContent)
+      ? rawContent.filter((b: any) => b.type === "text").map((b: any) => b.text).join(" ")
+      : "";
+  return content.replace(/\n+/g, " ").trim().slice(0, 60);
 }
 
 function getSessionsDir(): string {
@@ -74,6 +88,7 @@ export async function listSessions(): Promise<SessionMeta[]> {
         updatedAt: data.updatedAt,
         model: data.model,
         messageCount: data.messageCount,
+        title: data.title,
       });
     } catch {
       // skip corrupt files
