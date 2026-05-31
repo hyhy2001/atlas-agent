@@ -1,11 +1,19 @@
 import type { MessageParam } from "../provider/types.js";
 import type { OpenAIProvider } from "../provider/openai.js";
+import { getRecentReads } from "../utils/readFileState.js";
 
 export interface CompactionConfig {
   maxTokenEstimate: number;
   keepRecentMessages: number;
   contextWindow?: number;      // model context window size
   outputReserve?: number;      // tokens reserved for the summary/response
+}
+
+export interface CompactResult {
+  messages: MessageParam[];
+  summary: string;
+  preCompactCount: number;
+  reInjected?: { path: string; bytes: number }[];
 }
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -69,13 +77,14 @@ export async function compactMessages(params: {
   messages: MessageParam[];
   provider: OpenAIProvider;
   config: CompactionConfig;
-}): Promise<{ messages: MessageParam[]; summary: string }> {
+}): Promise<CompactResult> {
   const { messages, provider, config } = params;
 
   if (messages.length <= config.keepRecentMessages) {
-    return { messages, summary: "" };
+    return { messages, summary: "", preCompactCount: messages.length };
   }
 
+  const preCompactCount = messages.length;
   const splitIndex = messages.length - config.keepRecentMessages;
   const toSummarize = messages.slice(0, splitIndex);
   const toKeep = messages.slice(splitIndex);
@@ -96,11 +105,36 @@ export async function compactMessages(params: {
 
   const summary = await provider.complete(summarizeMessages, SUMMARIZATION_PROMPT);
 
-  return {
-    messages: [
-      { role: "user", content: `[Previous conversation summary — read this to understand context]\n\n${summary}` },
-      ...toKeep,
-    ],
-    summary,
-  };
+  // Re-inject up to 5 recently-read files within token budget so the agent
+  // doesn't lose code context after compaction. Mirrors cc-ref behaviour.
+  const RE_INJECT_BUDGET = 50_000;
+  const PER_FILE_LIMIT = 5_000;
+  const recentReads = getRecentReads().slice(0, 5);
+
+  const reInjected: { path: string; bytes: number }[] = [];
+  let budget = RE_INJECT_BUDGET;
+  const reInjectMessages: MessageParam[] = [];
+
+  for (const r of recentReads) {
+    const fileTokens = Math.min(PER_FILE_LIMIT, Math.ceil(r.content.length / 4));
+    if (budget - fileTokens < 0) break;
+    budget -= fileTokens;
+    const maxChars = PER_FILE_LIMIT * 4;
+    const content = r.content.length > maxChars
+      ? r.content.slice(0, maxChars) + `\n\n[truncated — ${r.content.length - maxChars} more chars]`
+      : r.content;
+    reInjectMessages.push({
+      role: "user",
+      content: `[Re-injected after compact: ${r.path}]\n\n\`\`\`\n${content}\n\`\`\``,
+    });
+    reInjected.push({ path: r.path, bytes: r.content.length });
+  }
+
+  const finalMessages: MessageParam[] = [
+    { role: "user", content: `[Compacted summary of ${preCompactCount} earlier messages]\n\n${summary}` },
+    ...reInjectMessages,
+    ...toKeep,
+  ];
+
+  return { messages: finalMessages, summary, preCompactCount, reInjected };
 }

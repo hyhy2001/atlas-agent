@@ -20,7 +20,7 @@ function makeSession(overrides = {}) {
 describe('sessions', () => {
   it('generateSessionId produces expected format', () => {
     const id = generateSessionId();
-    expect(id).toMatch(/^\d{8}-\d{6}-[0-9a-f]{4}$/);
+    expect(id).toMatch(/^\d{8}-\d{6}-[0-9a-f]{8}$/);
   });
 
   it('save + load roundtrip', async () => {

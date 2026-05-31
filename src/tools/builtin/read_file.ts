@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { ToolDefinition, ToolResult, ExecutionContext } from "../types.js";
+import { recordRead } from "../../utils/readFileState.js";
 
 export const readFileTool: ToolDefinition = {
   name: "read_file",
@@ -27,6 +28,7 @@ export const readFileTool: ToolDefinition = {
 
     try {
       const content = await readFile(fullPath, "utf-8");
+      recordRead(fullPath, content);
       const lines = content.split("\n");
       const sliced = lines.slice(offset, offset + limit);
       const numbered = sliced.map(

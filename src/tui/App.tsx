@@ -2,13 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { OpenAIProvider } from "../provider/openai.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolExecutor } from "../tools/executor.js";
 import type { MessageParam } from "../provider/types.js";
-import { generateSessionId, generateSessionTitle, listSessions, loadSession, saveSession, type Session } from "../sessions.js";
+import { appendCompactBoundary, appendMessage, generateSessionId, generateSessionTitle, initSession, listSessions, loadSession, saveSession, type Session } from "../sessions.js";
+import { paths } from "../paths.js";
 import type { CustomCommand } from "../commands.js";
 import { filterRegistryForSubagent, listSubagents, type SubagentProfile } from "../agent/subagents.js";
 import type { HooksConfig } from "../hooks.js";
@@ -41,6 +43,7 @@ import type { Skill } from "../skills.js";
 import { buildRegistry } from "./commands/builtin/index.js";
 import type { CommandSuggestion } from "./commands/registry.js";
 import type { SlashCommand } from "./commands/types.js";
+import { appendHistory, loadHistory, compactHistory } from "../promptHistory.js";
 
 interface AppProps {
   provider: OpenAIProvider;
@@ -206,6 +209,7 @@ export const App: React.FC<AppProps> = (props) => {
   const messagesRef = useRef<MessageParam[]>(props.initialSession?.messages ?? []);
   const sessionIdRef = useRef(props.initialSession?.id ?? generateSessionId());
   const sessionCreatedAtRef = useRef(props.initialSession?.createdAt ?? new Date().toISOString());
+  const sessionInitializedRef = useRef(Boolean(props.initialSession));
   const planModeRef = useRef(new PlanMode());
   const runningControllerRef = useRef<AbortController | null>(null);
   const ctrlCPressedAtRef = useRef<number | null>(null);
@@ -366,6 +370,17 @@ export const App: React.FC<AppProps> = (props) => {
       if (props.executor.ctx) props.executor.ctx.askUser = undefined;
     };
   }, [props.executor, enqueueDialog, permQueue]);
+
+  useEffect(() => {
+    loadHistory({ project: process.cwd(), limit: 100 }).then(entries => {
+      // Prepend persisted entries to in-memory history (oldest first)
+      // Don't overwrite entries already added this session
+      if (inputHistoryRef.current.length === 0) {
+        inputHistoryRef.current = entries.map(e => e.display);
+      }
+    }).catch(() => {});
+    compactHistory().catch(() => {});
+  }, []);
 
   const allCommandNames = [...COMMANDS, ...(props.commands ?? []).map(c => c.name)];
   const subagentNames = ["atlas-swift", "atlas-forge", "atlas-deep", ...(props.subagents ?? []).map(s => s.name)];
@@ -569,7 +584,16 @@ export const App: React.FC<AppProps> = (props) => {
     const content = planModeRef.current.isActive()
       ? "[PLAN MODE: You can only read and analyze. Do NOT suggest tool calls for write_file, edit_file, or bash. Design your approach and explain what changes you would make.]\n\n" + processed
       : processed;
-    messagesRef.current.push({ role: "user", content });
+    const userMessage: MessageParam = { role: "user", content };
+    messagesRef.current.push(userMessage);
+    if (!sessionInitializedRef.current) {
+      const sessionFile = path.join(paths.sessions(), `${sessionIdRef.current}.jsonl`);
+      if (!existsSync(sessionFile)) {
+        await initSession(sessionIdRef.current, { model: props.provider.getModel(), title: generateSessionTitle(messagesRef.current) }).catch(() => {});
+      }
+      sessionInitializedRef.current = true;
+    }
+    await appendMessage(sessionIdRef.current, userMessage).catch(() => {});
     const controller = new AbortController();
     runningControllerRef.current = controller;
     setIsRunning(true);
@@ -675,13 +699,16 @@ export const App: React.FC<AppProps> = (props) => {
       setReasoningPreview("");
       await recordEvent({ sessionId: sessionIdRef.current, timestamp: new Date().toISOString(), type: "turn_complete", data: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, cachedTokens: (result as any).cachedTokens ?? 0 } });
       await runLifecycleHooks(props.hooks?.Stop ?? [], { ATLAS_SESSION_ID: sessionIdRef.current });
+      const lastMessage = messagesRef.current[messagesRef.current.length - 1];
+      if (lastMessage?.role === "assistant") {
+        appendMessage(sessionIdRef.current, lastMessage).catch(() => {});
+      }
       if (shouldCompact(messagesRef.current, DEFAULT_COMPACTION_CONFIG)) {
         const before = messagesRef.current.length;
         const result = await compactMessages({ messages: messagesRef.current, provider: props.provider, config: DEFAULT_COMPACTION_CONFIG });
         messagesRef.current = result.messages;
-        addSystem(`[Compacted: ${before} → ${result.messages.length} messages]\n\n${result.summary}`);
+        addSystem(`[Compacted: ${before} → ${result.messages.length} messages · ${result.reInjected?.length ?? 0} files re-injected]\n\n${result.summary}`);
       }
-      saveSession(buildSession()).catch(() => {});
     } catch (err) {
       addSystem(formatApiError(err));
     } finally {
@@ -797,7 +824,17 @@ export const App: React.FC<AppProps> = (props) => {
                 config: DEFAULT_COMPACTION_CONFIG,
               });
               messagesRef.current = result.messages;
-              setHistory(h => [...h, { type: "compact_boundary", text: new Date().toLocaleTimeString() }]);
+              const sessions = await import("../sessions.js");
+              if ("appendCompactBoundary" in sessions) {
+                await (sessions as any).appendCompactBoundary(sessionIdRef.current, {
+                  preCompactCount: result.preCompactCount,
+                  summary: result.summary,
+                }).catch(() => {});
+              }
+              setHistory(h => [...h, {
+                type: "compact_boundary",
+                text: `${result.preCompactCount} → ${result.messages.length} msgs · ${result.reInjected?.length ?? 0} files re-injected`,
+              }]);
               return `Compacted ${before} → ${result.messages.length} messages.\n\n## Summary\n\n${result.summary}`;
             } catch (err) {
               return `Compact failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -885,6 +922,15 @@ export const App: React.FC<AppProps> = (props) => {
       inputHistoryRef.current.push(trimmed);
     }
     historyIndexRef.current = -1;
+    // Persist to disk (skip slash commands)
+    if (!trimmed.startsWith("/")) {
+      appendHistory({
+        display: trimmed,
+        timestamp: new Date().toISOString(),
+        project: process.cwd(),
+        sessionId: sessionIdRef.current,
+      }).catch(() => {});
+    }
 
     if (multiline) {
       if ((multiline.mode === "ticks" && isMultilineEnd(trimmed)) || (multiline.mode === "slash" && !shouldContinue(trimmed))) {
