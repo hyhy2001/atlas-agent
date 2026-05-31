@@ -22,4 +22,5 @@ export interface AgentTask {
   toolUses?: number;
   tokens?: number;
   lastToolInfo?: string;
+  messages?: HistoryEntry[];
 }

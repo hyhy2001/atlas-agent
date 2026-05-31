@@ -32,6 +32,8 @@ import { QuestionOverlay } from "./components/QuestionOverlay.js";
 import { PermissionRequest, type PermissionKind } from "./components/PermissionRequest.js";
 import { SubagentTree } from "./components/SubagentTree.js";
 import { PromptInput } from "./components/PromptInput.js";
+import { AgentPanel } from "./components/AgentPanel.js";
+import { AgentTranscript } from "./components/AgentTranscript.js";
 import { THEMES, ThemeContext, type ThemeName } from "./theme.js";
 import { useInputBuffer } from "./hooks/useInputBuffer.js";
 import { useDialogQueue } from "./hooks/useDialogQueue.js";
@@ -182,6 +184,8 @@ export const App: React.FC<AppProps> = (props) => {
   const [permMode, setPermMode] = useState<PermMode>("ask");
   const [gitBranch, setGitBranch] = useState<string>("");
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
+  const [viewingAgentId, setViewingAgentId] = useState<string | null>(null);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [atSuggestions, setAtSuggestions] = useState<AtSuggestion[]>([]);
   const [atSuggestionIndex, setAtSuggestionIndex] = useState(0);
   const [slashCmdIndex, setSlashCmdIndex] = useState(0);
@@ -617,7 +621,12 @@ export const App: React.FC<AppProps> = (props) => {
             const last = [...tasks].reverse().find(t => t.status === "running");
             if (!last) return tasks;
             return tasks.map(t => t === last
-              ? { ...t, toolUses: (t.toolUses ?? 0) + 1, lastToolInfo: summary ? `${name}(${summary})` : name }
+              ? {
+                  ...t,
+                  toolUses: (t.toolUses ?? 0) + 1,
+                  lastToolInfo: summary ? `${name}(${summary})` : name,
+                  messages: [...(t.messages ?? []), { type: "tool_call", text: summary, toolName: name, nested: false }],
+                }
               : t);
           });
           return;
@@ -693,7 +702,15 @@ export const App: React.FC<AppProps> = (props) => {
       const tail = rawSource.slice(committedLen);
       const finalText = pending + tail;
       if (finalText.trim()) {
-        setHistory(h => [...h, { type: "assistant", text: finalText.replace(/\n$/, "") }]);
+        const cleanedText = finalText.replace(/\n$/, "");
+        setHistory(h => [...h, { type: "assistant", text: cleanedText }]);
+        setAgentTasks(tasks => {
+          const last = [...tasks].reverse().find(t => t.status === "running");
+          if (!last) return tasks;
+          return tasks.map(t => t === last
+            ? { ...t, messages: [...(t.messages ?? []), { type: "assistant", text: cleanedText }] }
+            : t);
+        });
       }
       setLiveTail("");
       setReasoningPreview("");
@@ -1037,6 +1054,18 @@ export const App: React.FC<AppProps> = (props) => {
       return;
     }
 
+    if (key.ctrl && inputChar === "t") {
+      if (agentTasks.length > 0) {
+        setAgentPanelOpen(p => !p);
+      }
+      return;
+    }
+
+    if (key.leftArrow && viewingAgentId) {
+      setViewingAgentId(null);
+      return;
+    }
+
     // Ctrl+Z — undo input buffer first, then file-level undo
     if (key.ctrl && inputChar === "z") {
       const prev = undoBuffer();
@@ -1284,7 +1313,7 @@ export const App: React.FC<AppProps> = (props) => {
           />
         ) : (
           <>
-            <MessageList history={history} outputStyle={outputStyle} />
+            {!viewingAgentId && <MessageList history={history} outputStyle={outputStyle} />}
             {liveTokens > 80000 && (
               <Box paddingX={1}>
                 <Text color="yellow">{"⚠ "}</Text>
@@ -1324,7 +1353,22 @@ export const App: React.FC<AppProps> = (props) => {
                 <Text bold>{submittedPlaceholder}</Text>
               </Box>
             )}
-            {isRunning && <SubagentTree tasks={agentTasks} />}
+            {agentPanelOpen && agentTasks.length > 0 && (
+              <AgentPanel
+                tasks={agentTasks}
+                selectedId={viewingAgentId}
+                onSelect={id => setViewingAgentId(id)}
+                onClose={() => setAgentPanelOpen(false)}
+                width={fullWidth}
+              />
+            )}
+            {viewingAgentId && (() => {
+              const task = agentTasks.find(t => t.id === viewingAgentId);
+              return task ? (
+                <AgentTranscript task={task} outputStyle={outputStyle} />
+              ) : null;
+            })()}
+            {!viewingAgentId && isRunning && <SubagentTree tasks={agentTasks} />}
             {isRunning && (
               <SpinnerLine
                 spinFrame={spinFrame}
@@ -1355,6 +1399,7 @@ export const App: React.FC<AppProps> = (props) => {
               isRunning={isRunning}
               queuedMessage={queuedMessage}
               vimMode={vimState.mode}
+              hasAgents={agentTasks.length > 0}
             />
           </>
         )}
