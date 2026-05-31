@@ -1,4 +1,4 @@
-.PHONY: install build build-all dev test clean check-deps symlink install-node install-bun install-mcp build-mcp deps binary ensure-node ensure-bun _write-settings
+.PHONY: install build dev test clean clean-all help symlink ensure-node install-node deps install-mcp build-mcp _write-settings
 
 # Detect OS and arch
 OS     := $(shell uname -s 2>/dev/null || echo Windows)
@@ -6,12 +6,10 @@ ARCH   := $(shell uname -m 2>/dev/null || echo x86_64)
 
 ifeq ($(OS),Linux)
   PLATFORM := linux
-  BIN_EXT  :=
   NODE_DIST := node-v22.15.0-linux-x64
   NODE_URL  := https://nodejs.org/dist/v22.15.0/$(NODE_DIST).tar.gz
 else ifeq ($(OS),Darwin)
   PLATFORM := darwin
-  BIN_EXT  :=
   ifeq ($(ARCH),arm64)
     NODE_DIST := node-v22.15.0-darwin-arm64
   else
@@ -20,7 +18,6 @@ else ifeq ($(OS),Darwin)
   NODE_URL := https://nodejs.org/dist/v22.15.0/$(NODE_DIST).tar.gz
 else
   PLATFORM := windows
-  BIN_EXT  := .exe
   NODE_DIST := node-v22.15.0-win-x64
   NODE_URL  := https://nodejs.org/dist/v22.15.0/$(NODE_DIST).zip
 endif
@@ -33,38 +30,33 @@ else
   ARCH_NAME := x64
 endif
 
-# Local deps directory (no root needed)
-DEPS_DIR    := $(CURDIR)/deps
-NODE_DIR    := $(DEPS_DIR)/node
-BUN_DIR     := $(DEPS_DIR)/bun
-NODE_BIN    := $(NODE_DIR)/bin/node
-NPM_BIN     := $(NODE_DIR)/bin/npm
-BUN_BIN     := $(BUN_DIR)/bin/bun
+# Self-contained install — everything lives under $(CURDIR), no system deps.
+DEPS_DIR := $(CURDIR)/deps
+NODE_DIR := $(DEPS_DIR)/node
+NODE_BIN := $(NODE_DIR)/bin/node
+NPM_BIN  := $(NODE_DIR)/bin/npm
 
-# Binary output
-BUN_TARGET  := bun-$(PLATFORM)-$(ARCH_NAME)
-BINARY_NAME := atlas-agent-$(PLATFORM)-$(ARCH_NAME)$(BIN_EXT)
-BINARY_PATH := release/$(BINARY_NAME)
+# Always use the locally-installed Node and npm. No fallback to system —
+# this keeps the install fully reproducible and isolated from whatever
+# the user has in their environment.
+NODE := $(NODE_BIN)
+NPM  := $(NPM_BIN)
 
-# Symlink target
+# Symlink target — the only thing that lives outside the project dir.
 LOCAL_BIN := $(HOME)/.local/bin
 SYMLINK   := $(LOCAL_BIN)/atlas-agent
 
-# Use local node/bun if system ones not available
-NODE := $(shell command -v node 2>/dev/null || echo $(NODE_BIN))
-NPM  := $(shell command -v npm  2>/dev/null || echo $(NPM_BIN))
-BUN  := $(shell command -v bun  2>/dev/null || echo $(BUN_BIN))
-
-# Prepend deps bin dirs to PATH so subprocesses (tsc shebang #!/usr/bin/env node etc.) find them
-export PATH := $(NODE_DIR)/bin:$(BUN_DIR)/bin:$(PATH)
+# Prepend $(NODE_DIR)/bin to PATH so subprocesses (npm shebangs etc.) find
+# the local Node, but absolute paths in $(NODE)/$(NPM) remain authoritative.
+export PATH := $(NODE_DIR)/bin:$(PATH)
 
 # Default target
 all: install
 
-## install: Full install — download deps if needed, build, binary, MCP, symlink
-install: ensure-node ensure-bun deps build binary install-mcp symlink
+## install: Self-contained install — Node + deps + build + MCP + symlink
+install: ensure-node deps build install-mcp symlink
 	@echo ""
-	@echo "✓ atlas-agent installed successfully"
+	@echo "✓ atlas-agent installed (fully self-contained)"
 	@echo ""
 	@echo "Make sure $(LOCAL_BIN) is in your PATH:"
 	@echo "  export PATH=\"\$$HOME/.local/bin:\$$PATH\""
@@ -74,29 +66,16 @@ install: ensure-node ensure-bun deps build binary install-mcp symlink
 	@echo "  export ATLAS_BASE_URL=\"http://your-proxy:port/v1\""
 	@echo ""
 	@echo "Run: atlas-agent"
-	@echo "Or run directly: ./$(BINARY_PATH)"
 
-## ensure-node: Install Node.js locally if not found
+## ensure-node: Install Node.js into ./deps/node/ if missing
 ensure-node:
-	@if command -v node >/dev/null 2>&1 && node -e "if(parseInt(process.versions.node)<20)process.exit(1)" 2>/dev/null; then \
-	  echo "  ✓ Node.js $$(node -v) (system)"; \
-	elif [ -x "$(NODE_BIN)" ]; then \
-	  echo "  ✓ Node.js $$( $(NODE_BIN) -v) (local)"; \
+	@if [ -x "$(NODE_BIN)" ]; then \
+	  echo "  ✓ Node.js $$( $(NODE_BIN) -v) (./deps/node)"; \
 	else \
 	  $(MAKE) install-node; \
 	fi
 
-## ensure-bun: Install Bun locally if not found
-ensure-bun:
-	@if command -v bun >/dev/null 2>&1; then \
-	  echo "  ✓ Bun $$(bun --version) (system)"; \
-	elif [ -x "$(BUN_BIN)" ]; then \
-	  echo "  ✓ Bun $$( $(BUN_BIN) --version) (local)"; \
-	else \
-	  $(MAKE) install-bun; \
-	fi
-
-## install-node: Download and install Node.js into ./deps/node/
+## install-node: Download portable Node.js into ./deps/node/
 install-node:
 	@echo "Installing Node.js v22 into $(NODE_DIR)..."
 	@mkdir -p $(DEPS_DIR)
@@ -105,84 +84,32 @@ install-node:
 	@tar -xzf $(DEPS_DIR)/node-download.tar.gz -C $(NODE_DIR) --strip-components=1
 	@rm -f $(DEPS_DIR)/node-download.tar.gz
 	@echo "  ✓ Node.js $$( $(NODE_BIN) -v) installed at $(NODE_DIR)"
-	@echo "  Tip: add $(NODE_DIR)/bin to PATH to use system-wide"
 
-## install-bun: Download and install Bun into ./deps/bun/
-install-bun:
-	@echo "Installing Bun into $(BUN_DIR)..."
-	@mkdir -p $(BUN_DIR)/bin
-	@case "$(PLATFORM)-$(ARCH_NAME)" in \
-	  linux-x64)    BUN_ZIP="bun-linux-x64.zip" ;; \
-	  linux-arm64)  BUN_ZIP="bun-linux-aarch64.zip" ;; \
-	  darwin-x64)   BUN_ZIP="bun-darwin-x64.zip" ;; \
-	  darwin-arm64) BUN_ZIP="bun-darwin-aarch64.zip" ;; \
-	  windows-x64)  BUN_ZIP="bun-windows-x64.zip" ;; \
-	  *) echo "  Error: no Bun binary for $(PLATFORM)-$(ARCH_NAME)"; exit 1 ;; \
-	esac; \
-	URL="https://github.com/oven-sh/bun/releases/latest/download/$$BUN_ZIP"; \
-	echo "  Downloading: $$URL"; \
-	curl -fsSL "$$URL" -o $(DEPS_DIR)/bun-download.zip
-	@cd $(DEPS_DIR) && unzip -oq bun-download.zip && \
-	  mv bun-*/bun $(BUN_BIN) && \
-	  rmdir bun-* 2>/dev/null || true; \
-	  chmod +x $(BUN_BIN)
-	@rm -f $(DEPS_DIR)/bun-download.zip
-	@echo "  ✓ Bun $$( $(BUN_BIN) --version) installed at $(BUN_DIR)"
-	@echo "  Tip: add $(BUN_DIR)/bin to PATH to use system-wide"
-
-## deps: Install npm dependencies (tries bun first, falls back to npm)
+## deps: Install npm dependencies via local npm
 deps:
 	@echo "Installing npm dependencies..."
-	@echo "  Using: $(BUN) install"
-	@if SKIP_BINARY_BUILD=1 $(BUN) install --no-summary 2>&1 && [ -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
-	  echo "  ✓ Installed via bun"; \
-	else \
-	  echo ""; \
-	  echo "  bun install failed or didn't create node_modules. Falling back to npm..."; \
-	  echo "  Using: $(NPM) install --include=dev --legacy-peer-deps"; \
-	  rm -rf node_modules; \
-	  SKIP_BINARY_BUILD=1 NODE_ENV=development $(NPM) install --include=dev --legacy-peer-deps; \
-	  if [ ! -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
-	    echo ""; \
-	    echo "  ✗ Both bun and npm failed to install typescript."; \
-	    echo "    Run manually:  $(NPM) install --include=dev"; \
-	    echo "    Then check:    ls node_modules/typescript/bin/"; \
-	    exit 1; \
-	  fi; \
-	  echo "  ✓ Installed via npm"; \
+	@NODE_ENV=development $(NPM) install --include=dev --legacy-peer-deps
+	@if [ ! -f "$(CURDIR)/node_modules/typescript/bin/tsc" ]; then \
+	  echo "  ✗ npm install completed but typescript missing."; \
+	  echo "    Try: $(NPM) install --include=dev --legacy-peer-deps"; \
+	  exit 1; \
 	fi
+	@echo "  ✓ Installed"
 
-## build: Compile TypeScript
+## build: Compile TypeScript via local tsc
 build:
 	@echo "Building TypeScript..."
 	@$(NODE) $(CURDIR)/node_modules/typescript/bin/tsc -p tsconfig.json
+	@echo "  ✓ Built dist/"
 
-## binary: Build binary for current OS
-binary:
-	@echo "Building binary for $(PLATFORM)-$(ARCH_NAME)..."
-	@mkdir -p release
-	@$(NODE) scripts/patch-ink.mjs
-	@$(BUN) build --compile --minify --target=$(BUN_TARGET) ./src/cli.ts --outfile=$(BINARY_PATH)
-	@chmod +x $(BINARY_PATH) 2>/dev/null || true
-	@if [ ! -x $(BINARY_PATH) ]; then \
-	  echo "  ⚠ $(BINARY_PATH) not executable (noexec filesystem?) — symlink will use a node wrapper instead"; \
-	else \
-	  echo "  ✓ $(BINARY_PATH) ($$(du -sh $(BINARY_PATH) | cut -f1))"; \
-	fi
-
-## symlink: Symlink binary to ~/.local/bin (or wrapper script if noexec)
+## symlink: Create wrapper script in ~/.local/bin pointing to local node + dist/cli.js
 symlink:
 	@echo "Linking to $(SYMLINK)..."
 	@mkdir -p $(LOCAL_BIN)
-	@if [ -x "$(BINARY_PATH)" ]; then \
-	  ln -sf "$(CURDIR)/$(BINARY_PATH)" $(SYMLINK); \
-	  echo "  ✓ $(SYMLINK) → $(CURDIR)/$(BINARY_PATH)"; \
-	else \
-	  echo "  Binary not executable (noexec filesystem?), creating wrapper script instead..."; \
-	  printf '#!/bin/sh\nexec "$(NODE)" "$(CURDIR)/dist/cli.js" "$$@"\n' > $(SYMLINK); \
-	  chmod +x $(SYMLINK); \
-	  echo "  ✓ $(SYMLINK) (wrapper → node dist/cli.js)"; \
-	fi
+	@printf '#!/bin/sh\nexec "$(NODE)" "$(CURDIR)/dist/cli.js" "$$@"\n' > $(SYMLINK)
+	@chmod +x $(SYMLINK)
+	@echo "  ✓ $(SYMLINK)"
+	@echo "    → $(NODE) $(CURDIR)/dist/cli.js"
 
 ## install-mcp: Download codebase-memory-mcp into .atlas/bin/
 install-mcp:
@@ -220,7 +147,7 @@ install-mcp:
 ## _write-settings: Write .atlas/settings.json with absolute MCP path
 _write-settings:
 	@mkdir -p .atlas
-	@MCP_BIN="$$(pwd)/.atlas/bin/codebase-memory-mcp"; \
+	@MCP_BIN="$(CURDIR)/.atlas/bin/codebase-memory-mcp"; \
 	if [ ! -f .atlas/settings.json ]; then \
 	  echo "  Writing .atlas/settings.json with absolute MCP path..."; \
 	  printf '{\n  "model": "all",\n  "mcpServers": [\n    {\n      "name": "codebase-memory",\n      "command": "%s",\n      "args": [],\n      "autoApprove": true\n    }\n  ]\n}\n' "$$MCP_BIN" > .atlas/settings.json; \
@@ -229,15 +156,14 @@ _write-settings:
 	  echo "  ✓ .atlas/settings.json already exists (not overwritten)"; \
 	fi
 
-## build-mcp: Build codebase-memory-mcp from source (use when release binary is glibc-incompatible)
+## build-mcp: Build codebase-memory-mcp from source (when release binary is glibc-incompatible)
 build-mcp:
 	@echo "Building codebase-memory-mcp from source..."
-	@command -v gcc >/dev/null 2>&1 || { echo "  ✗ gcc not found"; exit 1; }
-	@command -v git >/dev/null 2>&1 || { echo "  ✗ git not found"; exit 1; }
+	@command -v gcc >/dev/null 2>&1 || { echo "  ✗ gcc not found (system requirement for build-mcp)"; exit 1; }
+	@command -v git >/dev/null 2>&1 || { echo "  ✗ git not found (system requirement for build-mcp)"; exit 1; }
 	@echo '#include <zlib.h>' | gcc -E -x c - >/dev/null 2>&1 || { \
 	  echo "  ✗ zlib headers not found by gcc."; \
-	  echo "    If your sysadmin can install: zlib1g-dev (Debian/Ubuntu) or zlib-devel (Fedora/RHEL)"; \
-	  echo "    Or set CPATH/C_INCLUDE_PATH if zlib is in a non-standard location"; \
+	  echo "    Install: zlib1g-dev (Debian/Ubuntu) or zlib-devel (Fedora/RHEL)"; \
 	  exit 1; \
 	}
 	@mkdir -p $(DEPS_DIR)
@@ -249,48 +175,41 @@ build-mcp:
 	@echo "  Building (~3-5 minutes — compiling 155 tree-sitter grammars)..."
 	@cd $(DEPS_DIR)/cbm-source && bash scripts/build.sh 2>&1 | tail -5
 	@if [ ! -f "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" ]; then \
-	  echo "  ✗ Build failed — binary not produced. Check $(DEPS_DIR)/cbm-source/build.log"; \
+	  echo "  ✗ Build failed — check $(DEPS_DIR)/cbm-source/build.log"; \
 	  exit 1; \
 	fi
 	@mkdir -p .atlas/bin
 	@cp "$(DEPS_DIR)/cbm-source/build/c/codebase-memory-mcp" .atlas/bin/codebase-memory-mcp
 	@chmod +x .atlas/bin/codebase-memory-mcp
 	@echo "  ✓ Built and installed to .atlas/bin/codebase-memory-mcp"
-	@echo "  ✓ Compiled with system glibc — no version mismatch"
 
-## build-all: Build binaries for all platforms
-build-all: ensure-node ensure-bun deps build
-	@echo "Building all platforms..."
-	@mkdir -p release
-	@$(NODE) scripts/build-all.mjs
-
-## dev: Run in development mode
+## dev: Run in development mode (uses local node + tsx)
 dev: ensure-node deps
 	@$(NPM) run dev
 
-## test: Run test suite
+## test: Run test suite (uses local node)
 test: ensure-node
 	@$(NPM) test
 
 ## clean: Remove build artifacts (keep deps/)
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -rf dist/ release/ node_modules/
+	@rm -rf dist/ node_modules/
 	@echo "  ✓ Cleaned (deps/ preserved)"
 
 ## clean-all: Remove everything including deps/
 clean-all:
 	@echo "Cleaning everything..."
-	@rm -rf dist/ release/ node_modules/ deps/
+	@rm -rf dist/ node_modules/ deps/
 	@echo "  ✓ Cleaned"
 
 ## help: Show available targets
 help:
-	@echo "atlas-agent Makefile"
+	@echo "atlas-agent Makefile (self-contained install)"
 	@echo ""
 	@echo "Usage: make <target>"
 	@echo ""
 	@grep -E '^## ' Makefile | sed 's/## /  /'
 	@echo ""
 	@echo "Local deps installed to: $(DEPS_DIR)"
-	@echo "Binary symlinked to:     $(SYMLINK)"
+	@echo "Symlink created at:      $(SYMLINK)"
